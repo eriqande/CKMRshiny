@@ -178,10 +178,22 @@ population_bars <- ggplot2::ggplot_build(pop_plot_reproduction(a))$data[[1]]
 sample_bars <- ggplot2::ggplot_build(pop_plot_reproduction(a, TRUE))$data[[1]]
 stopifnot(sum(population_bars$count) == 17 + 31,
           sum(sample_bars$count) == 8 + 11)
+# A log axis must preserve the same counts, including bins with one parent.
+log_bars <- ggplot2::ggplot_build(pop_plot_reproduction(a, y_scale = "log10"))$data[[1]]
+log_sample_bars <- ggplot2::ggplot_build(pop_plot_reproduction(a, TRUE, "log10"))$data[[1]]
+stopifnot(abs(sum(10^log_bars$ymax) - 48) < 1e-10,
+          abs(sum(10^log_sample_bars$ymax) - 19) < 1e-10,
+          all(log_bars$ymax > log_bars$ymin),
+          all(log_sample_bars$ymax > log_sample_bars$ymin))
+singleton_bars <- ggplot2::ggplot_build(pop_plot_reproduction(census, y_scale = "log10"))$data[[1]]
+stopifnot(any(abs(singleton_bars$ymax) < 1e-10),
+          all(singleton_bars$ymax > singleton_bars$ymin))
 plot_file <- tempfile(fileext = ".pdf")
 grDevices::pdf(plot_file, width = 10, height = 6)
 print(pop_plot_reproduction(a))
 print(pop_plot_reproduction(a, TRUE))
+print(pop_plot_reproduction(a, y_scale = "log10"))
+print(pop_plot_reproduction(a, TRUE, "log10"))
 print(pop_plot_pairs(sparse))
 print(pop_plot_estimates(sparse))
 all_zero <- sparse
@@ -220,6 +232,14 @@ if (requireNamespace("shiny", quietly = TRUE)) {
     session$setInputs(trial_id = "1", rep_id = 2)
     original <- current_trial()
     stopifnot(current_rep()$seed == 43)
+    session$setInputs(population_y_toggle = 1, sampling_y_toggle = 0)
+    stopifnot(population_y_scale() == "log10", sampling_y_scale() == "linear",
+              identical(current_trial(), original))
+    session$setInputs(sampling_y_toggle = 1)
+    stopifnot(population_y_scale() == "log10", sampling_y_scale() == "log10")
+    session$setInputs(population_y_toggle = 2, sampling_y_toggle = 2)
+    stopifnot(population_y_scale() == "linear", sampling_y_scale() == "linear",
+              identical(current_trial(), original))
     # Input edits don't rewrite the saved trial.
     session$setInputs(Nf = 20, seed = 100)
     stopifnot(identical(current_trial(), original))

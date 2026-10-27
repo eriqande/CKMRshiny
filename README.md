@@ -20,6 +20,11 @@ generates its own population, reproduction, and samples. All parents, including
 those with zero offspring or zero sampled offspring, appear in the relevant
 histograms.
 
+Population/Reproduction and Sampling each have an independent button to switch
+the histogram y-axis between linear and log10 scales. This changes the view only.
+Log10 bars start at 0.5 parents so counts of one remain visible; empty bins are
+omitted. Parents with zero offspring still appear in the occupied bin at x = 0.
+
 The moment estimate for each sex is `sampled parents * sampled kids / pairs`.
 The Poisson pseudo-likelihood assumes that the pair count has mean
 `sampled parents * sampled kids / abundance`. Its continuous maximum gives the

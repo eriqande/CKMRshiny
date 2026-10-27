@@ -33,23 +33,65 @@ pop_parent_counts <- function(replicate, sampled = FALSE) {
 #' Plot realized offspring counts in a population or sample
 #' @param replicate Saved replicate.
 #' @param sampled Use sampled parents and sampled offspring only.
+#' @param y_scale Either "linear" (default) or "log10". On a log10 axis,
+#' positive bin counts are drawn from a baseline of 0.5 so a count of one is
+#' visible. Empty bins are omitted, while the zero-offspring bin is retained.
 #' @return A faceted ggplot, with females and males in consistent panel positions.
 #' @export
-pop_plot_reproduction <- function(replicate, sampled = FALSE) {
+pop_plot_reproduction <- function(replicate, sampled = FALSE, y_scale = c("linear", "log10")) {
+  y_scale <- match.arg(y_scale)
   counts <- pop_parent_counts(replicate, sampled)
   # Large ranges use wider bins to keep extreme realizations legible.
   width <- max(1, ceiling((max(counts$offspring) + 1) / 60))
+  if (y_scale == "log10") {
+    bins <- .pop_histogram_bins(counts, width)
+    geometry <- ggplot2::geom_rect(data = bins,
+      ggplot2::aes(xmin = lower, xmax = upper, ymin = 0.5, ymax = n_parents, fill = sex),
+      inherit.aes = FALSE, color = "white")
+    axis <- ggplot2::scale_y_log10(limits = c(0.5, NA), breaks = .pop_log_count_breaks)
+  } else {
+    geometry <- ggplot2::geom_histogram(binwidth = width, boundary = -0.5, color = "white")
+    axis <- ggplot2::scale_y_continuous(breaks = .pop_count_breaks)
+  }
+  caption <- "Parents with zero offspring are included.\nPanel heights may use different scales."
+  if (y_scale == "log10") caption <- paste0(caption, "\nLog10 axis: bar baseline 0.5; empty bins omitted.")
   ggplot2::ggplot(counts, ggplot2::aes(x = offspring, fill = sex, weight = n_parents)) +
-    ggplot2::geom_histogram(binwidth = width, boundary = -0.5, color = "white") +
+    geometry +
     ggplot2::facet_wrap(~sex, nrow = 1, scales = "free_y") +
     ggplot2::scale_fill_manual(values = c(Female = "#237e83", Male = "#bd7330"),
                                  limits = c("Female", "Male")) +
     ggplot2::scale_x_continuous(breaks = .pop_count_breaks, limits = c(-0.5, NA)) +
-    ggplot2::scale_y_continuous(breaks = .pop_count_breaks) +
+    axis +
     ggplot2::labs(x = if (sampled) "Sampled offspring per sampled parent" else
-                    "Total offspring per parent", y = "Number of parents",
-                  caption = "Parents with zero offspring are included.\nPanel heights may use different scales.") +
+                    "Total offspring per parent",
+                  y = if (y_scale == "log10") "Number of parents (log10 scale)" else "Number of parents",
+                  caption = caption) +
     .pop_plot_theme()
+}
+
+#' Aggregate reproductive frequencies into the histogram's shared bin boundaries
+#'
+#' Only occupied bins are returned. Bin boundaries match geom_histogram with
+#' boundary -0.5 and integer binwidth, without expanding frequencies into rows.
+#' @param counts Frequency tibble with offspring, sex, and n_parents.
+#' @param width Positive integer binwidth used in the linear histogram.
+#' @return A data frame with sex, bin, n_parents, lower, and upper columns.
+#' @keywords internal
+.pop_histogram_bins <- function(counts, width) {
+  counts$bin <- floor((counts$offspring + 0.5) / width)
+  bins <- stats::aggregate(n_parents ~ sex + bin, data = counts, FUN = sum)
+  bins$lower <- bins$bin * width - 0.5
+  bins$upper <- bins$lower + width
+  bins
+}
+
+#' Choose whole-count powers of ten for a log10 count axis
+#' @param limits Axis limits supplied by ggplot2.
+#' @return Tick positions 1, 10, 100, etc. within the visible upper limit.
+#' @keywords internal
+.pop_log_count_breaks <- function(limits) {
+  ticks <- 10^seq(0, max(0, ceiling(log10(max(limits)))))
+  ticks[ticks <= max(limits)]
 }
 
 #' Plot the distribution of pair counts across replicates

@@ -118,12 +118,14 @@ pop_app_ui <- function() {
             shiny::div(class = "section",
               shiny::h3("01 \u00b7 Population / Reproduction"),
               shiny::p("Every adult has the same expected reproductive output. Each offspring independently receives one randomly chosen mother and father. Realized family sizes still vary."),
+              shiny::actionButton("population_y_toggle", "Y-axis: linear (switch to log10)"),
               shiny::plotOutput("population_plot", height = "290px")
             ),
             shiny::div(class = "section",
               shiny::h3("02 \u00b7 Sampling"),
               shiny::p("Females, males, and offspring are sampled independently without replacement. Each plot counts only sampled offspring belonging to sampled parents, including parents with no matches."),
               shiny::tableOutput("sampling_table"),
+              shiny::actionButton("sampling_y_toggle", "Y-axis: linear (switch to log10)"),
               shiny::plotOutput("sampling_plot", height = "290px")
             ),
             shiny::div(class = "section",
@@ -239,8 +241,24 @@ pop_app_server <- function(input, output, session) {
            " | mother-offspring pairs: ", sum(x$pairs$sex == "Female"),
            " | father-offspring pairs: ", sum(x$pairs$sex == "Male"))
   })
-  output$population_plot <- shiny::renderPlot(pop_plot_reproduction(current_rep()))
-  output$sampling_plot <- shiny::renderPlot(pop_plot_reproduction(current_rep(), sampled = TRUE))
+  # Each button affects its own view only. Its click count selects the scale;
+  # changing scales never changes a saved simulation or its sampling results.
+  population_y_scale <- shiny::reactive({
+    if (!is.null(input$population_y_toggle) && input$population_y_toggle %% 2 == 1) "log10" else "linear"
+  })
+  sampling_y_scale <- shiny::reactive({
+    if (!is.null(input$sampling_y_toggle) && input$sampling_y_toggle %% 2 == 1) "log10" else "linear"
+  })
+  shiny::observe({
+    label <- if (population_y_scale() == "log10") "Y-axis: log10 (switch to linear)" else "Y-axis: linear (switch to log10)"
+    shiny::updateActionButton(session, "population_y_toggle", label = label)
+  })
+  shiny::observe({
+    label <- if (sampling_y_scale() == "log10") "Y-axis: log10 (switch to linear)" else "Y-axis: linear (switch to log10)"
+    shiny::updateActionButton(session, "sampling_y_toggle", label = label)
+  })
+  output$population_plot <- shiny::renderPlot(pop_plot_reproduction(current_rep(), y_scale = population_y_scale()))
+  output$sampling_plot <- shiny::renderPlot(pop_plot_reproduction(current_rep(), sampled = TRUE, y_scale = sampling_y_scale()))
   output$pairs_plot <- shiny::renderPlot(pop_plot_pairs(current_trial(), current_rep_id()))
   output$estimates_plot <- shiny::renderPlot(pop_plot_estimates(current_trial(), current_rep_id()))
   output$intervals_plot <- shiny::renderPlot(pop_plot_intervals(current_trial(), current_rep_id()))
