@@ -64,6 +64,47 @@ for (sex in c("Female", "Male")) {
             sum(observed$n_parents[observed$sex == sex]) == if (sex == "Female") 8 else 11)
 }
 
+# Realized effective numbers use offspring-pair denominators and include adults
+# with zero offspring. Explicit female sizes are (0,1,3), male sizes (0,0,2,2).
+family_sizes <- list(reproduction_summary = tibble::tibble(
+  sex = c(rep("Female", 3), rep("Male", 2)),
+  offspring = c(0L, 1L, 3L, 0L, 2L), n_parents = c(1L, 1L, 1L, 2L, 2L)))
+effective <- pop_effective_numbers(family_sizes)
+stopifnot(identical(effective$census_n, c(3, 4)),
+          all(effective$n_offspring == 4),
+          effective$same_parent_probability[1] == 0.5,
+          abs(effective$same_parent_probability[2] - 1 / 3) < 1e-12,
+          identical(effective$effective_n, c(2, 3)),
+          abs(effective$effective_ratio[1] - 2 / 3) < 1e-12,
+          effective$effective_ratio[2] == 0.75)
+constant_families <- list(reproduction_summary = tibble::tibble(
+  sex = c("Female", "Male"), offspring = 2L, n_parents = 3L))
+stopifnot(all(pop_effective_numbers(constant_families)$effective_n == 5))
+no_siblings <- constant_families
+no_siblings$reproduction_summary$offspring <- 1L
+stopifnot(all(pop_effective_numbers(no_siblings)$same_parent_probability == 0),
+          all(is.infinite(pop_effective_numbers(no_siblings)$effective_n)),
+          all(is.infinite(pop_effective_numbers(no_siblings)$effective_ratio)))
+one_offspring <- no_siblings
+one_offspring$reproduction_summary$n_parents <- 1L
+stopifnot(all(is.na(pop_effective_numbers(one_offspring)$same_parent_probability)),
+          all(is.na(pop_effective_numbers(one_offspring)$effective_n)))
+large_family <- one_offspring
+large_family$reproduction_summary$offspring <- 10000000L
+stopifnot(all(pop_effective_numbers(large_family)$effective_n == 1))
+# Independently enumerate sibling pairs from the full pedigree. The compact
+# calculation must agree and be unaffected by the saved survey sample.
+effective <- pop_effective_numbers(a)
+for (i in seq_len(nrow(effective))) {
+  ids <- if (effective$sex[i] == "Female") full$pedigree$mother_id else full$pedigree$father_id
+  k <- tabulate(ids, nbins = effective$census_n[i])
+  expected_h <- sum(choose(k, 2)) / choose(nrow(full$pedigree), 2)
+  stopifnot(abs(effective$same_parent_probability[i] - expected_h) < 1e-12)
+}
+without_sample <- a
+without_sample$samples <- list()
+stopifnot(identical(effective, pop_effective_numbers(without_sample)))
+
 # A census gives every pair, including the singleton sample.int edge case.
 census <- pop_simulate_rep(pop_settings(1, 3, 20, 1, 3, 20), 5)
 stopifnot(sum(census$pairs$sex == "Female") == 20,
@@ -223,7 +264,7 @@ if (requireNamespace("shiny", quietly = TRUE)) {
   stopifnot(grepl("parent-offspring pair fundamentals", html, fixed = TRUE),
             grepl("An increasingly interesting series of simple parent-offspring scenarios", html, fixed = TRUE),
             grepl("Start with the simplest possible population", html, fixed = TRUE))
-  shiny::testServer(pop_app_server, {
+  shiny::testServer(.pop_scenario_server, {
     session$setInputs(Nf = 17, Nm = 31, Nk = 80, Sf = 8, Sm = 11, Sk = 40,
                       num_reps = 3, seed = 42, run_trial = 1)
     stopifnot(length(trials()) == 1)
@@ -232,6 +273,9 @@ if (requireNamespace("shiny", quietly = TRUE)) {
     session$setInputs(trial_id = "1", rep_id = 2)
     original <- current_trial()
     stopifnot(current_rep()$seed == 43)
+    stopifnot(grepl("Effective N / N", output$effective_numbers_table, fixed = TRUE),
+              grepl("Female </td> <td> 17 </td>", output$effective_numbers_table, fixed = TRUE),
+              grepl("Male </td> <td> 31 </td>", output$effective_numbers_table, fixed = TRUE))
     session$setInputs(population_y_toggle = 1, sampling_y_toggle = 0)
     stopifnot(population_y_scale() == "log10", sampling_y_scale() == "linear",
               identical(current_trial(), original))

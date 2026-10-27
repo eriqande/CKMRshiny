@@ -94,6 +94,45 @@ pop_plot_reproduction <- function(replicate, sampled = FALSE, y_scale = c("linea
   ticks[ticks <= max(limits)]
 }
 
+#' Evaluate a gamma reproductive sampling-weight density for preview
+#'
+#' Scale is one. The plotted range ends at the 99.5th percentile. For shape < 1
+#' the zero singularity is excluded by starting at 0.001 times the upper range;
+#' a mixed geometric/linear grid resolves the steep left edge. Values are raw
+#' gamma densities, not renormalized to the displayed range. No RNG is used.
+#' @param shape Gamma shape between 0.05 and 1000.
+#' @return A tibble with sampling_weight and density columns.
+#' @export
+pop_gamma_density <- function(shape) {
+  .pop_shape(shape)
+  upper <- stats::qgamma(0.995, shape = shape, scale = 1)
+  lower <- upper / 1000
+  x <- sort(unique(c(if (shape >= 1) 0,
+                     exp(seq(log(lower), log(upper), length.out = 300)),
+                     seq(lower, upper, length.out = 500))))
+  tibble::tibble(sampling_weight = x, density = stats::dgamma(x, shape = shape, scale = 1))
+}
+
+#' Plot a theoretical gamma density in the scenario's sex-specific color
+#' @param shape Gamma shape; scale is fixed at one.
+#' @param sex Either "Female" or "Male".
+#' @param y_scale Linear or log10 density axis. Exact zero densities are omitted
+#' on log10 axes; no artificial offset is added to the theoretical density.
+#' @return A ggplot that can be drawn before any trial exists.
+#' @export
+pop_plot_gamma <- function(shape, sex = c("Female", "Male"), y_scale = c("linear", "log10")) {
+  sex <- match.arg(sex)
+  y_scale <- match.arg(y_scale)
+  density <- pop_gamma_density(shape)
+  if (y_scale == "log10") density <- density[density$density > 0, ]
+  axis <- if (y_scale == "log10") ggplot2::scale_y_log10() else ggplot2::scale_y_continuous()
+  ggplot2::ggplot(density, ggplot2::aes(x = sampling_weight, y = density)) +
+    ggplot2::geom_line(color = if (sex == "Female") "#237e83" else "#bd7330", linewidth = 1) +
+    axis + ggplot2::labs(x = "Reproductive sampling weight",
+      y = if (y_scale == "log10") "Density (log10 scale)" else "Probability density") +
+    .pop_plot_theme()
+}
+
 #' Plot the distribution of pair counts across replicates
 #' @param trial Saved trial.
 #' @param rep_id Replicate to highlight with a dashed line.
@@ -225,4 +264,176 @@ pop_plot_intervals <- function(trial, rep_id = 1) {
     ggplot2::labs(x = "95% CI for adult abundance",
                     y = "Replicates, sorted by interval", caption = caption) +
     .pop_plot_theme()
+}
+
+#' Evaluate fixed-draw model previews without touching the trial RNG
+#' @param size_model Named sex-specific model settings.
+#' @param n Number of numerical integration draws per sex.
+#' @return Adult traits approximating the model distribution, using fixed seeds.
+#' @export
+pop_size_preview <- function(size_model, n = 12000) {
+  .pop_with_seed(927413, pop_generate_size_population(n, n, size_model))
+}
+
+#' Plot growth or length-based reproduction with sex-aligned panels
+#'
+#' Corresponding population/sample views use the same axes derived from compact
+#' full-population bounds. Large samples are displayed as an 80 by 80 grid with
+#' point area proportional to counts; every sampled adult contributes.
+#' @param adults Adult records to display (display subsample, full survey, or preview).
+#' @param size_model Saved sex-specific parameters.
+#' @param kind Growth (age-length) or output (length-ERRO).
+#' @param summary Optional full-population bins to set shared population/sample axes.
+#' @param curves_only Draw reference curves without individual points.
+#' @return A faceted ggplot, females left and males right.
+#' @export
+pop_plot_size_relationship <- function(adults, size_model, kind = c("growth", "output"),
+                                       summary = NULL, curves_only = FALSE) {
+  kind <- match.arg(kind)
+  curves <- do.call(rbind, lapply(c("Female", "Male"), function(s) {
+    p <- size_model[[s]]
+    age <- seq(p$min_age, p$max_age, length.out = 250)
+    length <- p$Linf * (-expm1(-p$K * (age - p$t0)))
+    a <- adults[adults$sex == s, ]
+    log_norm <- log(a$expected_reproductive_weight[1]) - p$exponent * log(a$length[1])
+    if (kind == "growth") data.frame(sex = s, x = age, y = length)
+    else {
+      upper <- if (!is.null(summary)) max(summary$upper[summary$variable == "length"]) else max(c(length, a$length))
+      length <- seq(0, upper, length.out = 250)
+      data.frame(sex = s, x = length,
+                 y = if (p$exponent == 0) rep(exp(log_norm), length(length)) else exp(p$exponent * log(length) + log_norm))
+    }
+  }))
+  points <- data.frame(sex = adults$sex,
+    x = if (kind == "growth") adults$age else adults$length,
+    y = if (kind == "growth") adults$length else adults$reproductive_weight, n = 1)
+  # Fixed bounds make population and survey views directly comparable.
+  xmax <- if (kind == "growth") max(vapply(size_model, `[[`, numeric(1), "max_age")) else
+    if (!is.null(summary)) max(summary$upper[summary$variable == "length"]) else max(points$x, curves$x)
+  ymax <- if (!is.null(summary)) max(summary$upper[summary$variable ==
+      if (kind == "growth") "length" else "reproductive_weight"]) else max(points$y, curves$y)
+  binned <- nrow(points) > 10000 && !curves_only
+  if (binned) {
+    points$xb <- pmin(79, floor(80 * points$x / xmax))
+    points$yb <- pmin(79, floor(80 * points$y / ymax))
+    points <- stats::aggregate(n ~ sex + xb + yb, points, sum)
+    points$x <- (points$xb + 0.5) * xmax / 80
+    points$y <- (points$yb + 0.5) * ymax / 80
+  }
+  plot <- ggplot2::ggplot() +
+    ggplot2::geom_line(data = curves, ggplot2::aes(x, y, color = sex), linewidth = 0.8)
+  if (!curves_only) {
+    if (binned) {
+      plot <- plot + ggplot2::geom_point(data = points,
+        ggplot2::aes(x, y, color = sex, size = n), alpha = 0.5) +
+        ggplot2::scale_size_area(max_size = 5)
+    } else {
+      plot <- plot + ggplot2::geom_point(data = points,
+        ggplot2::aes(x, y, color = sex), size = 0.8, alpha = 0.3)
+    }
+  }
+  plot + ggplot2::facet_wrap(~sex, nrow = 1) +
+    ggplot2::scale_color_manual(values = c(Female = "#237e83", Male = "#bd7330")) +
+    ggplot2::coord_cartesian(xlim = c(0, xmax), ylim = c(0, ymax)) +
+    ggplot2::labs(x = if (kind == "growth") "Age" else "Length",
+      y = if (kind == "growth") "Length" else "ERRO",
+      caption = paste(if (kind == "growth") "Line: growth at mean Linf and K." else
+        "Line: length^exponent,\non the same relative scale as ERRO.",
+        if (binned) "\nAll adults contribute; point areas\nshow counts in grid cells." else "")) + .pop_plot_theme()
+}
+
+#' Plot full-population ERRO histogram densities from compact summaries
+#' @param summary Full-population trait bins from pop_summarize_size().
+#' @param y_scale Linear or log10 density axis.
+#' @return Sex-faceted histogram of assigned ERRO, not realized offspring counts.
+#' @export
+pop_plot_erro <- function(summary, y_scale = c("linear", "log10")) {
+  y_scale <- match.arg(y_scale)
+  x <- summary[summary$variable == "reproductive_weight", ]
+  x$density <- x$count / ave(x$count, x$sex, FUN = sum) / (x$upper - x$lower)
+  if (y_scale == "log10") {
+    x <- x[x$density > 0, ]
+    baseline <- min(x$density) / 2
+  } else baseline <- 0
+  plot <- ggplot2::ggplot(x) +
+    ggplot2::geom_rect(ggplot2::aes(xmin = lower, xmax = upper, ymin = baseline,
+                                    ymax = density, fill = sex), color = "white") +
+    ggplot2::facet_wrap(~sex, nrow = 1, scales = "free_y") +
+    ggplot2::scale_fill_manual(values = c(Female = "#237e83", Male = "#bd7330")) +
+    ggplot2::labs(x = "Expected relative reproductive output (ERRO)", y = "Density",
+      caption = if (y_scale == "log10") "Positive-density bins only; bar baseline is half the smallest density." else
+        "ERRO has mean one within each sex.\nThese are reproductive sampling weights.") + .pop_plot_theme()
+  if (y_scale == "log10") plot + ggplot2::scale_y_log10() else plot
+}
+
+#' Compare adults with parents represented once per identified pair
+#'
+#' All distributions use the saved full-population bin edges. Observed parents
+#' are joined with match(), intentionally repeating adults with several matched
+#' offspring. Expected pair-parent bin probabilities are sums of actual ERRO,
+#' divided by total ERRO: the finite-population version of r*f(r). This is the
+#' expectation averaging over reproduction and uniform surveys, rather than
+#' a conditional prediction for a particular realized pedigree or adult sample.
+#' @param replicate A saved size-based replicate.
+#' @param variable ERRO (reproductive_weight) or length.
+#' @return Histogram-bin tibble, separately normalized by sex and source. Empty
+#' match distributions have zero density and are explicitly labeled by the plot.
+#' @export
+pop_pair_trait_data <- function(replicate, variable = c("reproductive_weight", "length")) {
+  variable <- match.arg(variable)
+  do.call(rbind, lapply(c("Female", "Male"), function(s) {
+    bins <- replicate$size_summary[replicate$size_summary$sex == s &
+                                    replicate$size_summary$variable == variable, ]
+    adults <- if (s == "Female") replicate$samples$females else replicate$samples$males
+    ids <- replicate$pairs$parent_id[replicate$pairs$sex == s]
+    values <- list(`Population adults` = NULL, `Sampled adults` = adults[[variable]],
+                   `Identified pairs` = adults[[variable]][match(ids, adults$parent_id)],
+                   `Expected pair parents` = NULL)
+    do.call(rbind, lapply(names(values), function(source) {
+      counts <- if (source == "Population adults") bins$count else
+        if (source == "Expected pair parents") bins$erro_sum else
+          tabulate(findInterval(values[[source]], c(bins$lower, tail(bins$upper, 1)),
+                                all.inside = TRUE), nbins = nrow(bins))
+      data.frame(sex = s, source = source, lower = bins$lower, upper = bins$upper,
+                 count = counts, total = sum(counts),
+                 density = if (sum(counts) > 0) counts / sum(counts) / (bins$upper - bins$lower) else 0)
+    }))
+  }))
+}
+
+#' Plot normalized adult and identified-pair trait histograms with expectations
+#' @param replicate A saved size-based replicate.
+#' @param variable ERRO or length.
+#' @return Two sex panels with population bars, sample/pair histogram outlines,
+#' and a dashed expected pair-parent distribution. Counts include repeated parents.
+#' @export
+pop_plot_pair_traits <- function(replicate, variable = c("reproductive_weight", "length")) {
+  variable <- match.arg(variable)
+  x <- pop_pair_trait_data(replicate, variable)
+  population <- x[x$source == "Population adults", ]
+  outlines <- x[x$source %in% c("Sampled adults", "Identified pairs") & x$total > 0, ]
+  # Explicit top and right edges produce true histogram outlines, including zeros.
+  segments <- rbind(transform(outlines, x = lower, xend = upper, y = density, yend = density),
+    do.call(rbind, lapply(split(outlines, interaction(outlines$sex, outlines$source), drop = TRUE), function(d) {
+      transform(d, x = lower, xend = lower, y = c(0, head(density, -1)), yend = density)
+    })))
+  expected <- x[x$source == "Expected pair parents", ]
+  labels <- data.frame(sex = c("Female", "Male"))
+  labels$label <- vapply(labels$sex, function(s) paste0("Pairs: ", sum(replicate$pairs$sex == s)), character(1))
+  ggplot2::ggplot() +
+    ggplot2::geom_rect(data = population, ggplot2::aes(xmin = lower, xmax = upper,
+      ymin = 0, ymax = density, fill = sex), alpha = 0.16) +
+    ggplot2::geom_segment(data = segments, ggplot2::aes(x, y, xend = xend, yend = yend,
+      color = sex, linewidth = source, linetype = source)) +
+    ggplot2::geom_line(data = expected, ggplot2::aes(x = (lower + upper) / 2, y = density,
+      group = sex), linetype = "dashed", color = "#233a3d", linewidth = 0.8) +
+    ggplot2::geom_text(data = labels, ggplot2::aes(x = Inf, y = Inf, label = label),
+      hjust = 1.05, vjust = 1.5, size = 3.4) +
+    ggplot2::facet_wrap(~sex, nrow = 1, scales = "free") +
+    ggplot2::scale_fill_manual(values = c(Female = "#237e83", Male = "#bd7330")) +
+    ggplot2::scale_color_manual(values = c(Female = "#237e83", Male = "#bd7330")) +
+    ggplot2::scale_linewidth_manual(values = c(`Sampled adults` = 0.45, `Identified pairs` = 1)) +
+    ggplot2::scale_linetype_manual(values = c(`Sampled adults` = "dotted", `Identified pairs` = "solid")) +
+    ggplot2::labs(x = if (variable == "length") "Length" else "ERRO", y = "Probability density",
+      caption = "Pale bars: population adults.\nDotted: sampled adults.\nSolid: identified pairs (repeats).\nDark dashed: expected pair parents.\nEach histogram integrates to one.") + .pop_plot_theme()
 }
