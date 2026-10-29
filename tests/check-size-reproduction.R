@@ -77,6 +77,20 @@ for (variable in c("length", "reproductive_weight")) {
 }
 preview <- pop_size_preview(model)
 stopifnot(identical(preview, pop_size_preview(model)), identical(state, .Random.seed))
+# The right axes recover discrete counts exactly, independently for each sex
+# and variable, including repeated parents. Zero matches have no count axis.
+for (variable in c("length", "reproductive_weight")) {
+  plot <- pop_plot_pair_traits(r, variable)
+  data <- pop_pair_trait_data(r, variable)
+  for (s in c("Female", "Male")) {
+    bins <- data[data$sex == s & data$source == "Identified pairs", ]
+    axis <- plot$panels[[s]]$scales$get_scales("y")$secondary.axis
+    stopifnot(max(abs(axis$trans(bins$density) - bins$count)) < 1e-10,
+              all(axis$breaks(c(0, 7.2)) %% 1 == 0))
+  }
+  no_pairs <- pop_plot_pair_traits(known, variable)
+  stopifnot(inherits(no_pairs$panels$Male$scales$get_scales("y")$secondary.axis, "waiver"))
+}
 file <- tempfile(fileext = ".pdf")
 grDevices::pdf(file, width = 10, height = 5)
 for (variable in c("length", "reproductive_weight")) {
@@ -89,6 +103,12 @@ for (kind in c("growth", "output")) {
 }
 print(pop_plot_erro(r$size_summary))
 print(pop_plot_erro(r$size_summary, "log10"))
+grDevices::dev.off()
+unlink(file)
+# Exercise the stacked layout on a narrow device too.
+file <- tempfile(fileext = ".pdf")
+grDevices::pdf(file, width = 4, height = 9)
+print(pop_plot_pair_traits(known))
 grDevices::dev.off()
 unlink(file)
 

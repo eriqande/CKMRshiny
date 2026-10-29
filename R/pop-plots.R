@@ -404,8 +404,9 @@ pop_pair_trait_data <- function(replicate, variable = c("reproductive_weight", "
 #' Plot normalized adult and identified-pair trait histograms with expectations
 #' @param replicate A saved size-based replicate.
 #' @param variable ERRO or length.
-#' @return Two sex panels with population bars, sample/pair histogram outlines,
-#' and a dashed expected pair-parent distribution. Counts include repeated parents.
+#' @return A printable pop_pair_traits object containing two ggplots. Each sex
+#' has its own secondary axis: count = density * identified pairs * bin width.
+#' With no matches that axis is omitted. Printing stacks panels on narrow devices.
 #' @export
 pop_plot_pair_traits <- function(replicate, variable = c("reproductive_weight", "length")) {
   variable <- match.arg(variable)
@@ -419,21 +420,69 @@ pop_plot_pair_traits <- function(replicate, variable = c("reproductive_weight", 
     })))
   expected <- x[x$source == "Expected pair parents", ]
   labels <- data.frame(sex = c("Female", "Male"))
-  labels$label <- vapply(labels$sex, function(s) paste0("Pairs: ", sum(replicate$pairs$sex == s)), character(1))
-  ggplot2::ggplot() +
-    ggplot2::geom_rect(data = population, ggplot2::aes(xmin = lower, xmax = upper,
+  labels$label <- vapply(labels$sex, function(s) {
+    n <- sum(replicate$pairs$sex == s)
+    if (n) paste0("Pairs: ", n) else "No identified pairs"
+  }, character(1))
+  panels <- lapply(c("Female", "Male"), function(s) {
+    subset_sex <- function(d) d[d$sex == s, ]
+    n <- sum(replicate$pairs$sex == s)
+    bin_width <- population$upper[population$sex == s][1] - population$lower[population$sex == s][1]
+    # Each sex needs its own transformation; a common faceted secondary axis
+    # would be wrong whenever match counts or bin widths differ between sexes.
+    secondary <- if (n > 0) ggplot2::sec_axis(~ . * n * bin_width,
+      name = "Identified pairs per bin", breaks = .pop_count_breaks) else ggplot2::waiver()
+    ggplot2::ggplot() +
+    ggplot2::geom_rect(data = subset_sex(population), ggplot2::aes(xmin = lower, xmax = upper,
       ymin = 0, ymax = density, fill = sex), alpha = 0.16) +
-    ggplot2::geom_segment(data = segments, ggplot2::aes(x, y, xend = xend, yend = yend,
+    ggplot2::geom_segment(data = subset_sex(segments), ggplot2::aes(x, y, xend = xend, yend = yend,
       color = sex, linewidth = source, linetype = source)) +
-    ggplot2::geom_line(data = expected, ggplot2::aes(x = (lower + upper) / 2, y = density,
+    ggplot2::geom_line(data = subset_sex(expected), ggplot2::aes(x = (lower + upper) / 2, y = density,
       group = sex), linetype = "dashed", color = "#233a3d", linewidth = 0.8) +
-    ggplot2::geom_text(data = labels, ggplot2::aes(x = Inf, y = Inf, label = label),
+    ggplot2::geom_text(data = subset_sex(labels), ggplot2::aes(x = Inf, y = Inf, label = label),
       hjust = 1.05, vjust = 1.5, size = 3.4) +
     ggplot2::facet_wrap(~sex, nrow = 1, scales = "free") +
     ggplot2::scale_fill_manual(values = c(Female = "#237e83", Male = "#bd7330")) +
     ggplot2::scale_color_manual(values = c(Female = "#237e83", Male = "#bd7330")) +
     ggplot2::scale_linewidth_manual(values = c(`Sampled adults` = 0.45, `Identified pairs` = 1)) +
     ggplot2::scale_linetype_manual(values = c(`Sampled adults` = "dotted", `Identified pairs` = "solid")) +
-    ggplot2::labs(x = if (variable == "length") "Length" else "ERRO", y = "Probability density",
-      caption = "Pale bars: population adults.\nDotted: sampled adults.\nSolid: identified pairs (repeats).\nDark dashed: expected pair parents.\nEach histogram integrates to one.") + .pop_plot_theme()
+    ggplot2::scale_y_continuous(sec.axis = secondary) +
+    ggplot2::labs(x = if (variable == "length") "Length" else "ERRO", y = "Probability density") +
+    .pop_plot_theme() + ggplot2::theme(axis.title.y.right = ggplot2::element_text(
+      color = if (s == "Female") "#237e83" else "#bd7330"))
+  })
+  structure(list(panels = stats::setNames(panels, c("Female", "Male")),
+    caption = paste("Pale bars: population adults. Dotted: sampled adults.",
+      "Solid: identified pairs (repeats). Dark dashed: expected pair parents.",
+      "Right axis: counts for the solid outline only.", sep = "\n")), class = "pop_pair_traits")
+}
+
+#' Draw independently scaled pair-trait panels without an extra layout package
+#' @param x A composition returned by pop_plot_pair_traits().
+#' @param ... Reserved for compatibility with print().
+#' @return Invisibly returns x after drawing on the current graphics device.
+#' @keywords internal
+print.pop_pair_traits <- function(x, ...) {
+  wide <- grid::convertWidth(grid::unit(1, "npc"), "inches", valueOnly = TRUE) >= 7.8
+  caption <- if (wide) x$caption else paste(
+    "Pale bars: population adults.", "Dotted: sampled adults.",
+    "Solid: identified pairs (repeats).", "Dark dashed: expected pair parents.",
+    "Right axis: solid-outline counts only.", sep = "\n")
+  grid::grid.newpage()
+  grid::pushViewport(grid::viewport(layout = grid::grid.layout(
+    nrow = if (wide) 2 else 3, ncol = if (wide) 2 else 1,
+    heights = grid::unit.c(if (wide) grid::unit(1, "null") else grid::unit(c(1, 1), "null"),
+                          grid::unit(if (wide) 50 else 75, "points")))))
+  for (i in seq_along(x$panels)) {
+    grid::pushViewport(grid::viewport(layout.pos.row = if (wide) 1 else i,
+                                      layout.pos.col = if (wide) i else 1))
+    grid::grid.draw(ggplot2::ggplotGrob(x$panels[[i]]))
+    grid::popViewport()
+  }
+  grid::pushViewport(grid::viewport(layout.pos.row = if (wide) 2 else 3,
+                                    layout.pos.col = if (wide) 1:2 else 1))
+  grid::grid.text(caption, x = grid::unit(8, "points"), y = grid::unit(1, "npc"),
+                  just = c("left", "top"), gp = grid::gpar(fontsize = 9))
+  grid::popViewport(2)
+  invisible(x)
 }

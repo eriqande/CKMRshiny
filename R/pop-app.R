@@ -176,7 +176,8 @@ pop_app_ui <- function() {
                 shiny::h4("Which adults appear in identified pairs?"),
                 shiny::p("For the selected replicate, compare normalized histograms of population adults, sampled adults, and parents represented once per identified pair. A parent with five matched offspring contributes five observations. Adult survey sampling is uniform; enrichment arises through reproduction."),
                 shiny::actionButton(ns("pair_trait_toggle"), "Compare ERRO (switch to length)"),
-                shiny::plotOutput(ns("pair_traits_plot"), height = "390px"),
+                shiny::plotOutput(ns("pair_traits_plot"), height = "auto"),
+                shiny::p(class = "hint", "The left axes show probability density. Each right axis gives identified pairs per bin for the solid outline only: density times that sex's number of pairs times bin width. Whole-number ticks show discrete pair counts. With no pairs, the count axis is omitted."),
                 shiny::p(class = "hint", "The dark dashed line shows the model expectation for pair parents, averaging over reproduction and uniform adult and offspring surveys. For mean-one ERRO r with population distribution f(r), this is r * f(r). In each bin we sum actual population ERROs and divide by total ERRO and bin width; the same reproductive weighting gives the expectation for length. All distributions use identical bins within each sex. With zero identified pairs, there is no observed-pair outline.")
               )
             ),
@@ -521,7 +522,8 @@ pop_app_server <- function(input, output, session) {
   shiny::div(class = "section", shiny::h3("Bigger adults have more offspring"),
     shiny::p("Adults now differ in age, growth, and length. A simple von Bertalanffy growth model and a length-based reproductive relationship turn these differences into expected relative reproductive outputs (ERROs). Larger adults tend to contribute more offspring, with separate settings for females and males."),
     shiny::p("Adult ages follow an exponential survival distribution between the chosen minimum and maximum ages. Mortality shapes this standing age distribution; no adults die between reproduction and sampling. Individual growth parameters can vary together, and reproductive output can vary even among fish of the same length."),
-    shiny::p("Adult survey sampling is still uniform and independent of size, age, and reproductive sampling weight. Explore how reproductive inequality affects kin pairs and estimation, and why parents in identified pairs can be larger than typical adults even under a random survey. Size-selective sampling will come in a later scenario."))
+    shiny::p("Adult survey sampling is still uniform and independent of size, age, and reproductive sampling weight. Explore how reproductive inequality affects kin pairs and estimation, and why parents in identified pairs can be larger than typical adults even under a random survey. Size-selective sampling will come in a later scenario."),
+    shiny::p("Although the sampled adults span different ages within an age-structured population, we still focus on a single cohort of offspring, all produced together and sampled at the same time. Sampling is non-lethal, and we consider only parent-offspring pairs."))
 }
 
 #' Build sex-specific model controls and immediate numerical previews
@@ -617,6 +619,16 @@ pop_app_server <- function(input, output, session) {
   output$sample_growth <- shiny::renderPlot(pop_plot_size_relationship(sampled(), current_rep()$settings$size_model, "growth", current_rep()$size_summary))
   output$sample_output <- shiny::renderPlot(pop_plot_size_relationship(sampled(), current_rep()$settings$size_model, "output", current_rep()$size_summary))
   output$population_erro <- shiny::renderPlot(pop_plot_erro(current_rep()$size_summary, scale_for(input$erro_y_toggle)))
-  output$pair_traits_plot <- shiny::renderPlot(pop_plot_pair_traits(current_rep(),
-    if (scale_for(input$pair_trait_toggle) == "linear") "reproductive_weight" else "length"))
+  output$pair_traits_plot <- shiny::renderPlot({
+    plot <- pop_plot_pair_traits(current_rep(),
+      if (scale_for(input$pair_trait_toggle) == "linear") "reproductive_weight" else "length")
+    # app.R sources helpers into its local environment. Draw explicitly rather
+    # than relying on Shiny finding a globally registered S3 print method.
+    print.pop_pair_traits(plot)
+    invisible(NULL)
+  },
+    height = function() {
+      width <- session$clientData[[paste0("output_", session$ns("pair_traits_plot"), "_width")]]
+      if (!is.null(width) && width < 562) 700 else 390
+    })
 }

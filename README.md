@@ -163,6 +163,11 @@ unsampled adults are discarded. The length expectation uses the same reproductiv
 weighting. It is not a conditional prediction based on one realized survey or
 pedigree. Observed histograms are normalized separately; no outline is drawn
 for a sex with zero pairs. Full-population bin edges are shared by all sources.
+Each sex has a right-hand **Identified pairs per bin** axis with whole-number
+ticks, using `count = density * identified pairs * bin width`. This axis applies
+to the solid identified-pair outline; all distributions retain their density
+interpretation on the left. The count axis is omitted when a sex has no matches.
+Panels stack on narrow screens and remain side by side on wider displays.
 
 Saved trials retain all sex-specific model settings, complete sampled adult
 traits, up to 500 display adults per sex, and compact full-population histogram
