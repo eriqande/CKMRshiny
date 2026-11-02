@@ -677,17 +677,134 @@ fitted_rows |>
 
 ## Approximate uncertainty in the abundance trajectory
 
-The Hessian (i.e., the matrix of second derivatives) of the **negative** log likelihood estimates parameter information
-at the fitted values. Its inverse, $V_\theta$, estimates the covariance of
-$(\log N_{y_0},r)$. For year $t$,
+### Uncertainty in the fitted parameters
 
-$$\log N_t=\log N_{y_0}+r(t-y_0),\qquad
-\operatorname{Var}(\log\widehat N_t)\approx
-(1,\ t-y_0)\,V_{\theta}\,(1,\ t-y_0)^\top.$$
+The Hessian (the matrix of second derivatives) of the **negative** log likelihood
+describes its curvature at the fitted parameter values. Under our working
+Poisson model, its inverse, $V_\theta$, estimates the **sampling covariance
+matrix of the parameter estimates**. To keep the notation compact, write
 
-These are pointwise, approximate model-based intervals. They inherit the
-Poisson working model's assumptions; they are not simultaneous confidence
-bands and do not account for every possible source of model misspecification.
+$$
+\alpha=\log N_{y_0},\qquad
+\theta=\begin{pmatrix}\alpha\\r\end{pmatrix},\qquad
+\widehat\theta=\begin{pmatrix}\widehat\alpha\\\widehat r\end{pmatrix}.
+$$
+
+Then
+
+$$
+V_\theta\approx\operatorname{Cov}(\widehat\theta)
+=\begin{pmatrix}
+\operatorname{Var}(\widehat\alpha) & \operatorname{Cov}(\widehat\alpha,\widehat r)\\
+\operatorname{Cov}(\widehat\alpha,\widehat r) & \operatorname{Var}(\widehat r)
+\end{pmatrix}.
+$$
+
+The hats matter. In this interpretation the true parameters are fixed but
+unknown; estimates would vary across repeated datasets. The diagonal entries
+describe the variances of those estimates, and the off-diagonal entries describe
+how they vary together. Because we fit **log abundance**, the first entry
+concerns $\widehat\alpha=\log\widehat N_{y_0}$, not $\widehat N_{y_0}$ itself.
+
+### What if we want uncertainty in a function of the parameters?
+
+That covariance matrix gets us uncertainty for the fitted parameters. But our
+biological question may concern a **function** of those parameters. For example,
+what is the variance of estimated log abundance in another year, $t$?
+
+The model tells us that
+
+$$
+g_t(\theta)=\log N_t=\alpha+r(t-y_0),
+$$
+and, because the maximum likelihood estimate of a function is just that function
+of the MLE, it follows that the MLE for $g_t(\theta)$ is found by substituting the MLEs for
+$\alpha$ and $r$ into the above:
+$$
+g_t(\widehat\theta)=\log\widehat N_t=\widehat\alpha+\widehat r(t-y_0).
+$$
+
+Uncertainty in both estimates, and their covariance, therefore contributes to
+uncertainty in $\log\widehat N_t$.
+
+The **delta method** propagates uncertainty through a smooth function using a
+first-order Taylor approximation. Locally, we replace the function with a line
+(or a plane when there are several parameters). The derivatives tell us how
+strongly a change in each parameter affects the quantity of interest. If $g$
+is a scalar function of our parameter vector, the approximation is
+
+$$
+g(\widehat\theta)\approx
+g(\theta)+\nabla g(\theta)^\top(\widehat\theta-\theta),
+$$
+
+where $\nabla g$ is the column vector of first derivatives. Taking the variance
+of this linear expression gives
+
+$$
+\operatorname{Var}\{g(\widehat\theta)\}\approx
+\nabla g(\theta)^\top\operatorname{Cov}(\widehat\theta)\nabla g(\theta).
+$$
+
+We do not know the true parameters or their sampling covariance. In practice,
+we evaluate the derivatives at $\widehat\theta$ and substitute $V_\theta$ for
+the covariance matrix. This is how derivatives connect uncertainty in the
+original estimates to uncertainty in a derived quantity.
+
+### Apply it to log abundance in year t
+
+For our particular function $g_t$, the derivatives are simple:
+
+$$
+\frac{\partial g_t}{\partial\alpha}=1,\qquad
+\frac{\partial g_t}{\partial r}=t-y_0,\qquad
+\nabla g_t=\begin{pmatrix}1\\t-y_0\end{pmatrix}.
+$$
+
+Writing out the variance of $\widehat\alpha+\widehat r(t-y_0)$ gives
+
+$$
+\begin{aligned}
+\operatorname{Var}(\log\widehat N_t)
+={}&\operatorname{Var}(\widehat\alpha)
+ +(t-y_0)^2\operatorname{Var}(\widehat r)\\
+ &+2(t-y_0)\operatorname{Cov}(\widehat\alpha,\widehat r).
+\end{aligned}
+$$
+
+This shows why we need the **covariance**, not just the two parameter variances.
+Depending on its sign and the year of interest, the covariance term can increase
+or decrease the resulting variance. The same calculation in compact matrix
+notation, substituting our estimated covariance matrix, is
+
+$$
+\widehat{\operatorname{Var}}(\log\widehat N_t)
+=(1,\ t-y_0)\,V_\theta\,(1,\ t-y_0)^\top.
+$$
+
+**The covariance transformation is exact here:** $g_t$ is linear in
+$(\alpha,r)$, so there are no higher-order Taylor terms to discard. The result
+still uses an approximate, estimated sampling covariance matrix, however.
+The delta method also works as a first-order approximation for nonlinear
+functions, such as $N_t=\exp\{\alpha+r(t-y_0)\}$; for those functions the local
+linear approximation itself introduces an additional approximation.
+
+### Connect the derivatives to the R calculation
+
+For several years, we stack the derivative vectors horizontally as rows of
+`log_N_jacobian`. Its first column is one and its second is `years - y0`.
+This matrix is called a **Jacobian**; each row is one year's gradient, written
+as a row instead of a column. Multiplying it by `V_theta`, multiplying the
+result elementwise by the Jacobian, and summing each row calculates the
+quadratic form above separately for each year. Taking square roots gives the
+standard errors of estimated log abundance.
+
+We form approximate normal intervals on the **log scale**, then exponentiate
+their endpoints to express them as positive abundance limits. These are
+pointwise, approximate model-based intervals. They inherit the Poisson working
+model's assumptions; they are not simultaneous confidence bands and do not
+account for every possible source of model misspecification. The exact linear
+covariance transformation does not make these confidence intervals exact.
 
 ```{r abundance-intervals}
 information <- optimHess(
@@ -695,8 +812,9 @@ information <- optimHess(
 )
 stopifnot(all(eigen(information, symmetric = TRUE, only.values = TRUE)$values > 0))
 V_theta <- solve(information)
-gradient <- cbind(1, years - y0)
-se_log_N <- sqrt(rowSums((gradient %*% V_theta) * gradient))
+log_N_jacobian <- cbind(1, years - y0)              # One row of derivatives for each year.
+var_log_N <- rowSums((log_N_jacobian %*% V_theta) * log_N_jacobian)
+se_log_N <- sqrt(var_log_N)                        # Convert estimated variances to standard errors.
 
 fitted_population <- fitted_population |>
   mutate(lower = exp(log(N_female) - 1.96 * se_log_N),
@@ -833,11 +951,8 @@ and give that to RTMB to make an autodiff function.
 Execution speed is a major reason to use it. A realistic fit may need thousands
 of evaluations of a much larger model. Executing a recorded calculation avoids
 repeating the R-level orchestration, and autodiff avoids the many perturbed
-objective evaluations needed for finite-difference derivatives. The speed gain
-depends on the model: for this tiny two-parameter example, we don't expect a huge
-speedup because tape construction
-and interface overhead can be as important as the arithmetic. We will measure
-evaluation time rather than promise a particular speedup.
+objective evaluations needed for finite-difference derivatives. We do not expect
+large speed differences in this tiny two-parameter example.
 
 Autodiff also gives derivatives by applying the chain rule to the recorded
 operations. Recall from your days in calculus that taking derivatives was
@@ -972,13 +1087,11 @@ ordinary R function scoping; we are not replace a function's environment or
 doing anything fancy there.
 
 ```{r rtmb-make-objective, eval=run_rtmb}
-tape_build_time <- system.time({  # system.time() stuff is just to record how long it takes
-  ad <- RTMB::MakeADFun(
-    func = function(par) acme_nll_rtmb(par, data = ad_data),
-    parameters = theta_start,
-    silent = TRUE
-  )
-})
+ad <- RTMB::MakeADFun(
+  func = function(par) acme_nll_rtmb(par, data = ad_data),
+  parameters = theta_start,
+  silent = TRUE
+)
 
 ad$par                  # Starting parameter vector, in our original order.
 ad$fn(theta_start)       # Negative log likelihood.
@@ -1057,44 +1170,13 @@ tibble(parameter = names(theta_start), ordinary_R = fit$par,
   knitr::kable(digits = 9)
 ```
 
-## Look at evaluation speed, with the setup cost kept separate
-
-The following small benchmark compares three ways to evaluate the objective:
-our original R likelihood; the prepared, structural-zero-filtered calculation
-evaluated in R; and the tape of that same prepared calculation. The middle
-version is important: removing repeated data work is itself an optimization,
-and we should not attribute that improvement entirely to RTMB.
-
-These timings cover objective values only, not gradients or whole fits. Results
-depend on machine, package versions, and model size; differences this small
-should not be overinterpreted. The benefits of fast derivatives can matter
-even when scalar objective timings are similar.
-
-```{r rtmb-timing, eval=run_rtmb}
-evaluators <- list(
-  `Original R objective` = ordinary_nll,
-  `Prepared calculation in R` = function(par) acme_nll_rtmb(par, ad_data),
-  `RTMB recorded calculation` = ad$fn
-)
-n_evaluations <- 2000L
-evaluation_times <- lapply(names(evaluators), function(label) {
-  fn <- evaluators[[label]]
-  invisible(fn(theta_start))                        # Warm up before measuring.
-  elapsed <- system.time(for (i in seq_len(n_evaluations)) fn(theta_start))[["elapsed"]]
-  tibble(method = label, evaluations = n_evaluations, seconds = elapsed,
-         microseconds_per_call = 1e6 * elapsed / n_evaluations)
-}) |>
-  bind_rows()
-knitr::kable(evaluation_times, digits = 3)
-cat("Tape construction elapsed seconds:", tape_build_time[["elapsed"]], "\n")
-```
-
 ## Reuse the manual delta method with the AD Hessian
 
 `ad$he()` supplies the Hessian of the negative log likelihood. This is observed
 curvature at the fitted parameters, not the expected information calculation
-used for planning a study. We invert it and use exactly the same delta-method
-calculation as before. Each row of `log_N_jacobian` is the gradient
+used for planning a study (which we will see in a few days!). We invert it and use the covariance propagation
+derived in [the earlier delta-method explanation](#approximate-uncertainty-in-the-abundance-trajectory).
+Each row of `log_N_jacobian` is the gradient
 $(1,t-y_0)$ of one year's log abundance with respect to the parameters.
 
 ```{r rtmb-manual-delta, eval=run_rtmb}

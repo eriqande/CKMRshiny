@@ -49,8 +49,7 @@ skip execution, or leave it true to run when RTMB is installed. The document
 does not install RTMB automatically. It explains fixed data versus taped
 arithmetic, structural zeros, supported probability functions, parameter-dependent
 checks, and rebuilding the tape after data changes. It checks objective values,
-gradients, and fitted parameters against the ordinary R version, and includes a
-small objective-evaluation benchmark with tape construction timed separately.
+gradients, and fitted parameters against the ordinary R version.
 
 Uncertainty calculations first reuse the manual delta method with an AD Hessian,
 then reproduce it with `ADREPORT()` and `sdreport()`, explicitly supplying the
