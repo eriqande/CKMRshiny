@@ -12,6 +12,7 @@ output:
 params:
   data_path: "../.can24/datasets/samp_delfi_A.rda"
   check_mark_code: true
+  use_rtmb: true
 ---
 
 <style>
@@ -47,7 +48,7 @@ options(dplyr.summarise.inform = FALSE)
 # someone runs the chunks manually in a fresh R session instead.
 if (!exists("params", inherits = FALSE)) {
   params <- list(data_path = "../.can24/datasets/samp_delfi_A.rda",
-                 check_mark_code = TRUE)
+                 check_mark_code = TRUE, use_rtmb = TRUE)
 }
 ```
 
@@ -811,6 +812,398 @@ age. Changing the maturity rule, the age roles used for comparisons, or lethal
 versus non-lethal sampling changes the model or comparison design and requires
 consistent changes to preparation and probabilities; it is more than a display
 option.
+
+# Optional: faster evaluation and automatic differentiation with RTMB
+
+So far we have written an ordinary R likelihood and used numerical derivatives
+for its Hessian. We can now introduce RTMB without changing the model, the
+comparison design, or our tidy representation of the observations. This section
+uses the same data and parameters, and checks that the results agree.
+
+## What RTMB changes, and why it can be faster
+
+With TMB's usual C++ interface, we write a C++ objective and compile a model
+library. **With RTMB, we write the objective in R.** `MakeADFun()` evaluates that
+function with special automatic-differentiation objects in place of the ordinary
+parameters, recording the arithmetic on an AD *tape*. Repeated objective and
+derivative evaluations then use the compiled TMB machinery to execute that
+recorded calculation. Here, we implement our negative log-likelihood in R
+and give that to RTMB to make an autodiff function.
+
+Execution speed is a major reason to use it. A realistic fit may need thousands
+of evaluations of a much larger model. Executing a recorded calculation avoids
+repeating the R-level orchestration, and autodiff avoids the many perturbed
+objective evaluations needed for finite-difference derivatives. The speed gain
+depends on the model: for this tiny two-parameter example, we don't expect a huge
+speedup because tape construction
+and interface overhead can be as important as the arithmetic. We will measure
+evaluation time rather than promise a particular speedup.
+
+Autodiff also gives derivatives by applying the chain rule to the recorded
+operations. Recall from your days in calculus that taking derivatives was
+pretty straightforward---there were never any surprises and it was always based
+on simple-to-implement rules.  This has allowed computers to take write down the
+computer code to evaluate the derivative of a function defined in computer code
+for some time.  RTMB allows that to happen to functions written in R.
+
+
+This introduction follows the [RTMB interface documentation](https://search.r-project.org/CRAN/refmans/RTMB/html/TMB-interface.html)
+and [reference manual](https://kaskr.r-universe.dev/RTMB/doc/manual.html).
+
+```{r rtmb-availability}
+run_rtmb <- isTRUE(params$use_rtmb) && requireNamespace("RTMB", quietly = TRUE)
+if (run_rtmb) {
+  cat("Running the optional section with RTMB", as.character(packageVersion("RTMB")), "\n")
+} else {
+  cat("RTMB section skipped. Install RTMB and set use_rtmb: true to execute it.\n",
+      "The ordinary R analysis above is complete without RTMB.\n", sep = "")
+}
+```
+
+If needed, run `install.packages("RTMB")` yourself, then restart the notebook.
+We do not install packages automatically. All executable chunks below are
+conditional on `run_rtmb`, so the document still knits when RTMB is absent or
+when `use_rtmb: false` is set in the YAML header.
+
+## Prepare the fixed inputs before recording the calculation
+
+The observed counts, comparison counts, birth-year lookup indices, and
+alive/mature conditions do not depend on the parameters. We can calculate them
+once, leaving only the parameter-dependent arithmetic inside the taped function.
+The category data frame remains our inspectable record of what was compared.
+
+We first handle **structural zeros**, not sampling zeros. A category that is
+biologically impossible for every parameter value has $p=0$ and must have
+observed count zero. Its Poisson log probability is always zero, so we can
+omit it without changing the likelihood or its derivatives. Boundary
+expressions involving $\log(0)$ can cause problems in AD implementations;
+removing these fixed, identically zero contributions avoids relying on how
+a particular RTMB version handles that boundary. (Recall, above, that we relied on the
+fact that `dpois(0,0)` returns 1, so its log is 0.  We can't do that with AD,
+and, generally, if there are some categories that have 0 probability of having
+any kin matches, it is probably better practice to remove them first, like we
+are doing here, anyway).
+
+**We retain all possible categories with zero observed matches.** They have
+positive expected counts and contribute information. The filter below uses
+known biology, not whether a match happened. We check the discarded counts
+before filtering, so an inconsistent positive count cannot silently disappear.
+
+```{r rtmb-fixed-data, eval=run_rtmb}
+eligible_for_ad <- categories$alive_at_birth & categories$mature_at_birth
+stopifnot(!anyNA(eligible_for_ad),
+          all(categories$n_MOP[!eligible_for_ad] == 0))
+
+ad_categories <- categories |>
+  filter(alive_at_birth, mature_at_birth)           # Fixed structural-zero filter, not n_MOP > 0.
+
+ad_data <- list(
+  n_MOP = as.numeric(ad_categories$n_MOP),           # Fixed observations can be ordinary numeric vectors.
+  n_comp_MOP = ad_categories$n_comp_MOP,
+  log_comparisons = log(ad_categories$n_comp_MOP),  # Fixed log of num pairwise comparisons per category: calculate once.
+  birth_index = match(ad_categories$Bju, years),    # Same year lookup as the ordinary R function, but do it outside of objective function
+  years = years,
+  y0 = y0
+)
+stopifnot(nrow(ad_categories) > 0, !anyNA(ad_data$birth_index),
+          all(ad_data$n_comp_MOP > 0))
+
+tibble(quantity = c("Original category rows", "Fixed structural-zero (biologically impossible) rows omitted",
+                    "Rows retained for AD", "Retained rows with zero observed matches"),
+       n = c(nrow(categories), sum(!eligible_for_ad), nrow(ad_categories),
+             sum(ad_categories$n_MOP == 0))) |>
+  knitr::kable()
+```
+
+## A slightly adjusted negative log likelihood
+
+We continue with the **parameter-vector approach**, in the same order as before:
+`par[1]` is $\log N_{y_0}$ and `par[2]` is $r$. RTMB also accepts named parameter
+lists. Its `getAll()` helper can unpack named parameter or data lists into local
+variables inside a function. We do not need that convenience here.
+
+For the retained categories the eligibility indicators are one. Hence
+
+$$
+\lambda_j=C_j/N_{b_j},\qquad
+\log\lambda_j=\log C_j-
+\left[\theta_1+\theta_2(b_j-y_0)\right].
+$$
+
+The new function uses this equivalent log-mean calculation and returns the
+**negative** log likelihood directly. Compare it with `acme_loglik()` above:
+
+* Data and lookup indices are prepared outside the function; there are no joins
+  to repeat during differentiation.
+* `RTMB::dpois()` explicitly selects the AD-compatible distribution function.
+  It also works with ordinary numeric inputs, which lets us check the function
+  before recording anything.
+* We remove the parameter-dependent `is.finite()`/`if` guard. The parameters are
+  AD objects during recording, and such ordinary R checks do not generally
+  describe a differentiable computation on active parameters.
+* We do **not** use `as.numeric()` on parameter-dependent quantities. Doing so
+  would discard their AD information or fail. The conversion of fixed observed
+  counts above is harmless.
+
+```{r rtmb-objective-function, eval=run_rtmb}
+#' AD-compatible negative log likelihood for the prepared Acme categories
+#' @param par Parameter vector: log female abundance at y0, then growth rate.
+#' @param data Fixed inputs prepared in ad_data, including positive comparison exposure.
+#' @return Scalar negative Poisson log likelihood, numeric or an RTMB AD object.
+acme_nll_rtmb <- function(par, data) {
+  log_N_year <- par[1] + par[2] * (data$years - data$y0)
+  log_lambda <- data$log_comparisons - log_N_year[data$birth_index]
+  lambda <- exp(log_lambda)
+  -sum(RTMB::dpois(data$n_MOP, lambda = lambda, log = TRUE))
+}
+
+ordinary_nll <- function(par) -acme_loglik(par, categories, years, y0)
+acme_nll_rtmb(theta_start, ad_data)                 # Still ordinary R evaluation at this point.
+stopifnot(abs(acme_nll_rtmb(theta_start, ad_data) - ordinary_nll(theta_start)) < 1e-7)
+```
+
+## Construct the tape and inspect what it returns
+
+`MakeADFun()` expects a function with a single parameter argument. Our short
+anonymous-function wrapper, below, 
+supplies `ad_data` explicitly to the two-argument function, just as our
+earlier optimizer wrapper supplied `categories` to `acme_loglik()`. This is
+ordinary R function scoping; we are not replace a function's environment or
+doing anything fancy there.
+
+```{r rtmb-make-objective, eval=run_rtmb}
+tape_build_time <- system.time({  # system.time() stuff is just to record how long it takes
+  ad <- RTMB::MakeADFun(
+    func = function(par) acme_nll_rtmb(par, data = ad_data),
+    parameters = theta_start,
+    silent = TRUE
+  )
+})
+
+ad$par                  # Starting parameter vector, in our original order.
+ad$fn(theta_start)       # Negative log likelihood.
+ad$gr(theta_start)       # First derivatives: one entry per parameter.
+ad$he(theta_start)       # Hessian: the matrix of second derivatives.
+```
+
+The tape incorporates the fixed inputs used when it was constructed. **If we
+change the samples, categories, maturity rule, or lookup structure, we rebuild
+the AD object.** Editing the original data frame after constructing `ad` does
+**not** update the recorded objective. Tape construction is a one-time cost for a
+given prepared model, not a step to repeat inside the optimizer.
+
+Before fitting, we compare values away from the optimum too. Agreement at only
+one point would not establish that two functions describe the same surface.
+
+```{r rtmb-check-values, eval=run_rtmb}
+ad_checks <- tibble(
+  label = c("Starting values", "Ordinary R optimum", "Declining", "Growing"),
+  log_N0 = c(theta_start[1], fit$par[1], log(30000), log(300000)),
+  growth_rate = c(theta_start[2], fit$par[2], -0.03, 0.04)
+)
+ad_checks$R_nll <- mapply(function(n, r) ordinary_nll(c(n, r)),
+                         ad_checks$log_N0, ad_checks$growth_rate)
+ad_checks$RTMB_nll <- mapply(function(n, r) ad$fn(c(n, r)),
+                            ad_checks$log_N0, ad_checks$growth_rate)
+ad_checks$difference <- ad_checks$RTMB_nll - ad_checks$R_nll
+stopifnot(max(abs(ad_checks$difference)) < 1e-7)
+knitr::kable(ad_checks, digits = 8)
+```
+
+We can also check an AD gradient against a central finite difference, perturbing
+one parameter at a time while holding the other fixed:
+
+$$
+\frac{\partial f}{\partial\theta_i}
+\approx\frac{f(\theta+h_i e_i)-f(\theta-h_i e_i)}{2h_i}.
+$$
+
+We do this at the starting values, where the derivatives are appreciably
+different from zero. Finite differences have step-size error; they are a useful
+check, not the definition of the AD derivative.
+
+```{r rtmb-check-gradient, eval=run_rtmb}
+step <- c(1e-5, 1e-6)
+finite_difference <- vapply(seq_along(theta_start), function(i) {
+  offset <- numeric(length(theta_start))
+  offset[i] <- step[i]
+  (ordinary_nll(theta_start + offset) - ordinary_nll(theta_start - offset)) / (2 * step[i])
+}, numeric(1))
+ad_gradient <- as.numeric(ad$gr(theta_start))
+stopifnot(max(abs(finite_difference - ad_gradient) / (1 + abs(ad_gradient))) < 1e-5)
+tibble(parameter = names(theta_start), finite_difference = finite_difference,
+       autodiff = ad_gradient, difference = ad_gradient - finite_difference) |>
+  knitr::kable(digits = 7)
+```
+
+## Fit with the same optimizer, now supplying the gradient
+
+The optimizer remains `nlminb()`. It now receives an efficient objective and
+its AD gradient, rather than requesting numerical objective perturbations to
+approximate that gradient. We use the original starting values, not the earlier
+optimum, so this is a separate fit.
+
+```{r rtmb-fit, eval=run_rtmb}
+fit_rtmb <- nlminb(start = ad$par, objective = ad$fn, gradient = ad$gr)
+
+# just catch if something went awry
+stopifnot(fit_rtmb$convergence == 0,
+          max(abs(fit_rtmb$par - fit$par)) < 1e-4,
+          abs(fit_rtmb$objective - fit$objective) < 1e-6,
+          max(abs(ad$gr(fit_rtmb$par))) < 0.01)
+
+tibble(parameter = names(theta_start), ordinary_R = fit$par,
+       RTMB = fit_rtmb$par, difference = fit_rtmb$par - fit$par) |>
+  knitr::kable(digits = 9)
+```
+
+## Look at evaluation speed, with the setup cost kept separate
+
+The following small benchmark compares three ways to evaluate the objective:
+our original R likelihood; the prepared, structural-zero-filtered calculation
+evaluated in R; and the tape of that same prepared calculation. The middle
+version is important: removing repeated data work is itself an optimization,
+and we should not attribute that improvement entirely to RTMB.
+
+These timings cover objective values only, not gradients or whole fits. Results
+depend on machine, package versions, and model size; differences this small
+should not be overinterpreted. The benefits of fast derivatives can matter
+even when scalar objective timings are similar.
+
+```{r rtmb-timing, eval=run_rtmb}
+evaluators <- list(
+  `Original R objective` = ordinary_nll,
+  `Prepared calculation in R` = function(par) acme_nll_rtmb(par, ad_data),
+  `RTMB recorded calculation` = ad$fn
+)
+n_evaluations <- 2000L
+evaluation_times <- lapply(names(evaluators), function(label) {
+  fn <- evaluators[[label]]
+  invisible(fn(theta_start))                        # Warm up before measuring.
+  elapsed <- system.time(for (i in seq_len(n_evaluations)) fn(theta_start))[["elapsed"]]
+  tibble(method = label, evaluations = n_evaluations, seconds = elapsed,
+         microseconds_per_call = 1e6 * elapsed / n_evaluations)
+}) |>
+  bind_rows()
+knitr::kable(evaluation_times, digits = 3)
+cat("Tape construction elapsed seconds:", tape_build_time[["elapsed"]], "\n")
+```
+
+## Reuse the manual delta method with the AD Hessian
+
+`ad$he()` supplies the Hessian of the negative log likelihood. This is observed
+curvature at the fitted parameters, not the expected information calculation
+used for planning a study. We invert it and use exactly the same delta-method
+calculation as before. Each row of `log_N_jacobian` is the gradient
+$(1,t-y_0)$ of one year's log abundance with respect to the parameters.
+
+```{r rtmb-manual-delta, eval=run_rtmb}
+H_rtmb <- ad$he(fit_rtmb$par)
+stopifnot(all(eigen(H_rtmb, symmetric = TRUE, only.values = TRUE)$values > 0))
+V_rtmb <- solve(H_rtmb)
+log_N_jacobian <- cbind(1, years - y0)
+log_N_rtmb <- fit_rtmb$par[1] + fit_rtmb$par[2] * (years - y0)
+se_log_N_rtmb <- sqrt(rowSums((log_N_jacobian %*% V_rtmb) * log_N_jacobian))
+
+rtmb_intervals <- tibble(
+  year = years,
+  N_female = exp(log_N_rtmb),
+  se_log_N = se_log_N_rtmb,
+  lower = exp(log_N_rtmb - 1.96 * se_log_N_rtmb),
+  upper = exp(log_N_rtmb + 1.96 * se_log_N_rtmb)
+)
+knitr::kable(rtmb_intervals, digits = 4)
+```
+
+The estimates and intervals should closely match those from the numerical
+Hessian, allowing for numerical differentiation and optimization tolerances.
+Autodiff changes how we calculate derivatives; it does not change the likelihood
+or remove the assumptions behind these uncertainty intervals.
+
+## Ask RTMB to propagate uncertainty: ADREPORT and sdreport
+
+For this model, differentiating $\log N_t$ by hand is easy. In a larger model,
+the quantity of interest might be a complicated function of many parameters.
+`ADREPORT()` marks derived quantities for automatic uncertainty propagation;
+`sdreport()` then uses their AD Jacobians and the fitted parameter covariance
+to apply the delta method. It does not simulate a sampling distribution or
+construct a profile likelihood.
+
+We add a reporting wrapper that marks both log abundance and abundance itself.
+It returns the same negative log likelihood as before. `ADREPORT()` is called
+inside the objective being recorded, so adding these reports requires a new
+AD object. We do not need to refit: this new object represents the same
+objective, and we pass the already fitted parameters explicitly to `sdreport()`.
+
+```{r rtmb-reporting, eval=run_rtmb}
+acme_nll_with_reports <- function(par) {
+  log_N_ad <- par[1] + par[2] * (ad_data$years - ad_data$y0)
+  N_ad <- exp(log_N_ad)
+  RTMB::ADREPORT(log_N_ad)
+  RTMB::ADREPORT(N_ad)
+  acme_nll_rtmb(par, data = ad_data)
+}
+
+ad_reporting <- RTMB::MakeADFun(acme_nll_with_reports, theta_start, silent = TRUE)
+stopifnot(abs(ad_reporting$fn(fit_rtmb$par) - ad$fn(fit_rtmb$par)) < 1e-7)
+ad_sdr <- RTMB::sdreport(ad_reporting, par.fixed = fit_rtmb$par,
+                         hessian.fixed = H_rtmb)
+stopifnot(isTRUE(ad_sdr$pdHess))
+reported <- summary(ad_sdr, "report")
+reported_log_N <- reported[rownames(reported) == "log_N_ad", , drop = FALSE]
+reported_N <- reported[rownames(reported) == "N_ad", , drop = FALSE]
+stopifnot(nrow(reported_log_N) == length(years), nrow(reported_N) == length(years))
+
+report_comparison <- tibble(
+  year = years,
+  log_N = reported_log_N[, "Estimate"],
+  manual_se_log_N = se_log_N_rtmb,
+  sdreport_se_log_N = reported_log_N[, "Std. Error"],
+  difference = sdreport_se_log_N - manual_se_log_N,
+  N_female = reported_N[, "Estimate"],
+  sdreport_se_N = reported_N[, "Std. Error"]
+)
+stopifnot(max(abs(report_comparison$log_N - log_N_rtmb)) < 1e-7,
+          max(abs(report_comparison$difference)) < 1e-6,
+          max(abs(report_comparison$sdreport_se_N - exp(log_N_rtmb) * se_log_N_rtmb)) < 1e-4)
+knitr::kable(report_comparison, digits = 7)
+```
+
+We explicitly supply the AD Hessian as `hessian.fixed`, so `sdreport()` uses
+the same parameter information matrix as our manual calculation. Without that
+argument, the installed TMB implementation can construct its Hessian by
+numerically differentiating the AD gradient. That is usually close, but using
+the same Hessian makes this an unambiguous check of the propagation step.
+
+The standard errors of log abundance should agree with the manual calculation
+to numerical precision. For abundance itself the first-order delta method gives
+$\operatorname{SE}(\widehat N_t)\approx\widehat N_t\operatorname{SE}(\log\widehat N_t)$;
+the last check verifies that relationship too.
+
+To reproduce the earlier positive confidence limits, use the **log-scale**
+reports and then exponentiate:
+
+```{r rtmb-reported-intervals, eval=run_rtmb}
+reported_intervals <- report_comparison |>
+  transmute(year, N_female,
+            lower = exp(log_N - 1.96 * sdreport_se_log_N),
+            upper = exp(log_N + 1.96 * sdreport_se_log_N))
+stopifnot(max(abs(reported_intervals$lower - rtmb_intervals$lower)) < 1e-4,
+          max(abs(reported_intervals$upper - rtmb_intervals$upper)) < 1e-4)
+knitr::kable(reported_intervals, digits = 4)
+```
+
+Using $\widehat N\pm1.96\operatorname{SE}(\widehat N)$ instead would produce
+normal intervals on the abundance scale, not these exponentiated log-scale
+intervals. Both use first-order uncertainty propagation, but their interval
+endpoints are not identical. `sdreport()` supplies standard errors; the scale
+and interpretation of our confidence limits remain modeling choices.
+
+We have now connected the same category table to an ordinary R fit, a recorded
+RTMB fit, a manually propagated covariance calculation, and an automatically
+propagated one. No random effects or Laplace approximation are needed for this
+Acme model; those are additional capabilities we can introduce with examples
+that actually need them.
 
 ```{r session-information}
 sessionInfo()

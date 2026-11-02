@@ -2,18 +2,16 @@
 
 Start with [fit_delfi_A.Rmd](fit_delfi_A.Rmd), a static R Markdown companion to
 Mark's Acme Archipelago example. Preparation is shown inline, with
-inspectable tables, figures, and mathematics. The only analysis function is the
-likelihood used repeatedly by the optimizer.
+inspectable tables, figures, and mathematics. Preparation stays inline;
+likelihood functions are introduced when repeated evaluation becomes useful.
 
 Open the Rmd in RStudio and run its chunks in order or click **Knit**. Required
 packages are `dplyr` (1.1.0 or newer), `tidyr`, `ggplot2`, `tibble`, `rmarkdown`,
 and `knitr`. Rendering HTML also requires Pandoc, included with RStudio.
 
 Change `data_path` in the first data-loading chunk, or edit the `data_path` YAML
-parameter. The default is `../.can2024/datasets/samp_delfi_A.rda`, relative to
-the Rmd's folder. In this checkout the repository link is actually named
-`.can24`; the notebook explicitly falls back to that spelling when the unchanged
-default is unavailable. Absolute paths work too. The simulated data are not
+parameter. The current default is `../.can24/datasets/samp_delfi_A.rda`, relative
+to the Rmd's folder. Absolute paths work too. The simulated data are not
 copied into this folder; participants need their own authorized copy of Mark's
 course repository.
 
@@ -39,10 +37,26 @@ rmarkdown::render(
 )
 ```
 
-The final optional section compares preparation and likelihood values with
+The original-code cross-check compares preparation and likelihood values with
 Mark's original functions, and checks the fitted parameter estimates. It uses
 `mvbutils`, `offarray`, and `atease` only when available and when
 `check_mark_code` is true. It sources `r-scripts/ckmr_funs.r` from the repository
 containing the chosen dataset; it does not run Mark's interactive driver script.
+
+The final optional section introduces **RTMB**, using an ordinary parameter
+vector and explicit data inputs. Set `use_rtmb: false` in the YAML header to
+skip execution, or leave it true to run when RTMB is installed. The document
+does not install RTMB automatically. It explains fixed data versus taped
+arithmetic, structural zeros, supported probability functions, parameter-dependent
+checks, and rebuilding the tape after data changes. It checks objective values,
+gradients, and fitted parameters against the ordinary R version, and includes a
+small objective-evaluation benchmark with tape construction timed separately.
+
+Uncertainty calculations first reuse the manual delta method with an AD Hessian,
+then reproduce it with `ADREPORT()` and `sdreport()`, explicitly supplying the
+same Hessian. Both log abundance and abundance are reported; confidence limits
+are constructed on the log scale and exponentiated, as in the earlier analysis.
+The section also explains named parameter lists and `getAll()` as alternative
+interfaces without requiring them for this example. It was verified with RTMB 2.0.
 
 Generated HTML files are kept in `output/`, which is ignored by Git.
