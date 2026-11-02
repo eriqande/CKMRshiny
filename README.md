@@ -1,5 +1,10 @@
 # CKMRshiny
 
+For a static, step-by-step companion to Mark Bravington's Acme Archipelago
+analysis, see [the tidy R Markdown examples](tidy_rmd_examples/README.md).
+The notebook starts from his original data, keeps preparation visible, and
+checks agreement with the original likelihood when his packages are available.
+
 A teaching app for exploring parent-offspring close-kin mark-recapture. The
 first scenario uses independent random mating, equal expected reproductive
 output, and independent simple random samples of females, males, and offspring.
