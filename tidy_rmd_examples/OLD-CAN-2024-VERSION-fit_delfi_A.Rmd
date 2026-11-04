@@ -1,0 +1,1292 @@
+---
+title: "Acme Archipelago: a tidy route from samples to a CKMR likelihood"
+author: "A companion to Mark's Delfinus example"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: show
+    theme: readable
+    self_contained: true
+params:
+  data_path: "../.can24/datasets/samp_delfi_A.rda"
+  check_mark_code: true
+  use_rtmb: true
+---
+
+<style>
+/* Keep wide tables and code blocks inside the page, with horizontal scrolling. */
+.main-container table { display: block; max-width: 100%; overflow-x: auto; }
+.main-container pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+  word-wrap: normal !important;
+}
+.main-container pre code {
+  white-space: inherit !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+  word-wrap: normal !important;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = TRUE,
+                      fig.width = 9, fig.height = 4.8, fig.align = "center",
+                      out.width = "100%", collapse = TRUE, comment = "#>")
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(tibble)
+theme_set(theme_minimal(base_size = 13))
+options(dplyr.summarise.inform = FALSE)
+# Knit supplies params from the YAML header. Supply the same defaults when
+# someone runs the chunks manually in a fresh R session instead.
+if (!exists("params", inherits = FALSE)) {
+  params <- list(data_path = "../.can24/datasets/samp_delfi_A.rda",
+                 check_mark_code = TRUE, use_rtmb = TRUE)
+}
+```
+
+# What we will do
+
+This notebook follows the Acme Archipelago example in Mark Bravington's
+`fit_delfi_A.r` and `Delfinus.pdf`. We use his original simulated dataset and
+the same female-only, adult-to-juvenile comparison design and Poisson pseudo-likelihood. The change is how we expose the calculations: individual records,
+comparison categories, and predictions are ordinary data frames.
+
+We leave the preparation steps expanded so you can run each chunk and inspect
+its output. Sections 2 to 4 are casual stroll through the "boring data prep" part
+of the CKMR estimate.  Mark's version of the same includes some self-described
+"esoteRica."  This version is done using tidyverse tools.  It involves a few more
+lines of code than Mark's nice, lean solution, but this might be more
+accessible to some participants.  
+
+After the data prep, we go on to the likelihood.  Only after calculating
+the likelihood openly at one parameter
+vector do we collect that calculation into a function for the optimizer.
+No Shiny runtime is needed. Open this file in RStudio and run chunks in order,
+or Knit it to HTML. The rendered document includes the code, tables, and figures.
+Wide tables scroll horizontally so all category covariates remain available.
+
+The core analysis needs **dplyr (1.1.0 or newer), tidyr, ggplot2, and tibble**, plus **rmarkdown
+and knitr** for rendering. If needed, install them once:
+
+```{r install-packages, eval=FALSE}
+install.packages(c("dplyr", "tidyr", "ggplot2", "tibble", "rmarkdown", "knitr"))
+```
+
+The optional final cross-check uses Mark's packages if they are installed;
+the analysis itself does not depend on them. We do not distribute his simulated
+data here: participants should obtain the course repository from Mark.
+
+# Meet the original data
+
+## Choose the data file
+
+**This is the path to change for your computer.** R Markdown normally executes
+chunks relative to the folder containing the Rmd. Consequently, `../` below
+means the parent of `tidy_rmd_examples/`, not the parent of your current console
+working directory. An absolute path also works. You can edit the variable in
+this chunk, or change `params$data_path` in the YAML header.
+
+```{r data-path}
+data_path <- params$data_path  # Change to the location of Mark's simulated dataset.
+
+# This CKMRshiny checkout calls its link .can24, rather than .can2024.
+# Use that spelling only if the unchanged default is unavailable locally.
+if (identical(data_path, "../.can2024/datasets/samp_delfi_A.rda") &&
+    !file.exists(data_path) && file.exists("../.can24/datasets/samp_delfi_A.rda")) {
+  data_path <- "../.can24/datasets/samp_delfi_A.rda"
+}
+if (!file.exists(data_path)) {
+  stop("Set data_path to your copy of datasets/samp_delfi_A.rda in Mark's repository.")
+}
+data_path <- normalizePath(data_path, mustWork = TRUE)
+data_path
+```
+
+An `.rda` file stores named R objects, rather than just a single table. We load
+it into a temporary container so its object names cannot overwrite notebook
+variables. This one use of an environment is only a safe file-loading device;
+we do not use environments to pass data to the likelihood.
+
+```{r load-data}
+loaded_data <- new.env(parent = emptyenv())
+loaded_names <- load(data_path, envir = loaded_data)
+stopifnot("samp_delfi_A" %in% loaded_names)
+raw_data <- loaded_data$samp_delfi_A
+rm(loaded_data)
+
+names(raw_data)
+names(attributes(raw_data))
+```
+
+The main list contains:
+
+* `Samps`: sampled individuals and their measured attributes.
+* `POPs`: identified parent-offspring pairs, with parent in column 1 and offspring
+  in column 2. The entries are **row indices in the original `Samps` table**.
+* `MHSPs` and `PHSPs`: maternal and paternal half-sibling pairs. We do not use
+  these in the Acme analysis.
+
+Two attributes carry additional information:
+
+* `public`: information available to the analyst.
+* `secret`: the population truth recorded by the simulator. We do not use it
+  for preparation, parameter estimation, or uncertainty calculations.
+
+Mark's `@public` notation is a super-convenient accessor syntax. Here we simply
+use the ordinary R syntax: `attr(raw_data, "public")`.  It's ugly for sure, and
+nowhere near as elegant as Mark's R syntactical sweetness, but we only have to use
+it a time or two...
+
+```{r inspect-inputs}
+public <- attr(raw_data, "public")
+names(public)
+names(attr(raw_data, "secret"))  # Names only; simulation truth is not fitted data.
+
+Amat <- public$Amat             # Knife-edge age at maturity, in years.
+Amat
+head(raw_data$Samps)
+head(raw_data$POPs)
+```
+
+In `Samps`, `Me` is an individual's name, `Sex` is its sex, `Y` is its sampling
+year, and `A` is its age at sampling. Both year and age are known exactly in
+this example. The public `C_sya` object contains catch information indexed by
+sex, year, and age. **We do not use catch totals to fit this Acme model**:
+the numbers of pairwise comparisons we use in the model are calculated from the
+numbers of sampled individuals. More elaborate fish
+models can use catches in their population dynamics.
+
+## Give the original row indices a permanent column
+
+We add `idx` **before any filtering**. Subsetting the samples will then leave
+these identifiers intact, so the original pair entries remain meaningful.
+We never use row positions in a filtered table as individual identifiers.
+
+```{r permanent-indices}
+samples <- as_tibble(raw_data$Samps) |>
+  mutate(idx = row_number(), .before = 1)  # Preserve the original Samps row number.
+
+pairs <- tibble(
+  pair_idx = seq_len(nrow(raw_data$POPs)),  # Identify each observed pair record.
+  parent_idx = raw_data$POPs[, 1],         # Original parent row index.
+  offspring_idx = raw_data$POPs[, 2]       # Original offspring row index.
+)
+
+stopifnot(!anyDuplicated(samples$idx), !anyDuplicated(samples$Me),
+          all(pairs$parent_idx %in% samples$idx),
+          all(pairs$offspring_idx %in% samples$idx),
+          !anyDuplicated(pairs[c("parent_idx", "offspring_idx")]))
+
+# Join names to the first few pairs to see the indexing convention in action.
+pairs |>
+  slice_head(n = 6) |>
+  left_join(select(samples, parent_idx = idx, parent_name = Me), by = "parent_idx") |>
+  left_join(select(samples, offspring_idx = idx, offspring_name = Me), by = "offspring_idx") |>
+  knitr::kable()
+```
+
+# Prepare individuals and pairs for counting
+
+We reproduce Mark's analysis choices: keep female samples, call individuals
+sampled at age $A\ge A_{\mathrm{mat}}$ **potential parents**, and call those sampled
+at $A<A_{\mathrm{mat}}$ **potential offspring**. Every retained kin pair must have
+those corresponding parent and offspring roles. Both members are female, so
+these are specifically **mother-daughter pairs**, abbreviated MOPs below.
+
+These are roles **at sampling**. An adult at capture was not necessarily mature
+when a particular offspring was born. That question enters the probability
+model later. Likewise, we deliberately exclude observed mother-daughter pairs
+in which both animals were adults at sampling, even though those are genuine
+kin pairs: they are outside this analysis's comparison design.  (Remember, we are
+free to choose which comparisons we will retain for use in the model...as long as
+we don't cheat and base those decisions upon the number of kin pairs in different
+comparisons!)
+
+Birth year follows directly from the observed age:
+
+$$B=Y-A.$$
+
+```{r prepare-individuals}
+female_samples <- samples |>
+  filter(Sex == "F") |>                             # Analyze female population dynamics.
+  mutate(B = Y - A,                                 # Recover each individual's birth year.
+         role = if_else(A >= Amat, "Adult", "Juvenile")) # Assign its role at sampling.
+
+female_samples |>
+  count(Y, role, name = "n_sampled") |>
+  pivot_wider(names_from = role, values_from = n_sampled, values_fill = 0) |>
+  knitr::kable(caption = "Female samples by sampling year and role")
+```
+
+Many individuals share a birth year and sampling year. The size of each point
+below represents the number in that group. Adult and juvenile status concerns
+the gap between the two years, not the birth year alone.
+
+```{r cohort-figure}
+female_samples |>
+  count(Y, B, role, name = "n") |>
+  ggplot(aes(Y, B, size = n, color = role)) +
+  geom_point(alpha = 0.75) +
+  geom_abline(intercept = -Amat, slope = 1, linetype = "dashed", color = "grey45") +
+  scale_size_area(max_size = 8) +
+  scale_color_manual(values = c(Adult = "#6A51A3", Juvenile = "#D4A017")) +
+  labs(x = "Sampling year (Y)", y = "Birth year (B = Y - A)",
+       size = "Sample count", color = "Role at sampling",
+       caption = "Dashed line: age at sampling equals the maturity age.")
+```
+
+We now join the pair entries to the female sample records twice, using `idx`
+as a stable key. Inner joins retain pairs only when both individuals are in
+the female analysis sample. The role filter then selects adult-to-juvenile pairs.
+The `relationship` assertions ensure each pair endpoint matches just one animal.
+
+```{r prepare-pairs}
+female_pairs <- pairs |>
+  inner_join(                                      # Look up the putative mother's attributes.
+    female_samples |>
+      select(parent_idx = idx, Yad = Y, Aad = A, Bad = B, parent_role = role),
+    by = "parent_idx", relationship = "many-to-one"
+  ) |>
+  inner_join(                                      # Look up the daughter's attributes.
+    female_samples |>
+      select(offspring_idx = idx, Bju = B, offspring_role = role),
+    by = "offspring_idx", relationship = "many-to-one"
+  )
+
+analysis_pairs <- female_pairs |>
+  filter(parent_role == "Adult", offspring_role == "Juvenile") # Match the comparison design.
+
+tibble(stage = c("All recorded POPs", "Both individuals female", "Adult-to-juvenile MOPs"),
+       n_pairs = c(nrow(pairs), nrow(female_pairs), nrow(analysis_pairs))) |>
+  knitr::kable()
+
+analysis_pairs |>
+  select(pair_idx, parent_idx, offspring_idx, Bju, Yad, Aad, Bad) |>
+  slice_head(n = 8) |>
+  knitr::kable()
+```
+
+The pair counts above describe identified kin, not all comparisons. Each mother
+may contribute multiple pair records if several of her daughters were sampled.
+We will count every such pair once.
+
+# Build the table of comparison categories
+
+One of the fundamental units of most CKMR models is the number of pairwise
+comparisons of a given type where "given type" is determined by categorization
+based on the (relevant) covariates measured on each member of the pair.  This section
+details how we count those.  And instead of storing them in a multidimensional
+array, here we put them all in a single long-format data frame, which can be a little
+easier to read.
+
+## Define the indices and their ranges
+
+Write $b$ for offspring birth year, $y$ for adult sampling year, and $a$ for adult
+age at sampling. The symbols `Bju`, `Yad`, and `Aad` in the code retain Mark's names.
+Each row of the eventual likelihood table represents one $(b,y,a)$ category.
+
+We construct complete integer ranges from the observed female juvenile birth
+years and adult sampling years and ages, just as Mark's code does. If an
+intermediate year or age has no samples, its sample count is explicitly zero.
+We do **not** generate every individual adult-juvenile comparison.
+
+```{r index-ranges}
+adults <- female_samples |> filter(role == "Adult")
+juveniles <- female_samples |> filter(role == "Juvenile")
+stopifnot(nrow(adults) > 0, nrow(juveniles) > 0)
+
+Bju_range <- seq.int(min(juveniles$B), max(juveniles$B))
+Yad_range <- seq.int(min(adults$Y), max(adults$Y))
+Aad_range <- seq.int(min(adults$A), max(adults$A))
+
+y0 <- min(Bju_range)                     # Reference year for the abundance parameter.
+years <- seq.int(y0, max(Yad_range))      # Years over which we calculate abundance.
+
+tibble(index = c("b: juvenile birth year", "y: adult sampling year", "a: adult sampling age"),
+       first = c(min(Bju_range), min(Yad_range), min(Aad_range)),
+       last = c(max(Bju_range), max(Yad_range), max(Aad_range))) |>
+  knitr::kable()
+```
+
+Here $y_0$ is the earliest sampled juvenile birth year, reproducing Mark's choice.
+It specifies which year's abundance the first parameter describes; it does not
+mean the population began in that year. A different fixed reference year would
+reparameterize the same exponential trajectory. The `years` vector covers every
+birth-year lookup and extends through the last adult sampling year for plotting.
+
+## Count samples before counting comparisons
+
+Let $m_b^{\mathrm{ju}}$ be the number of sampled female juveniles born in year $b$,
+and let $m_{ya}^{\mathrm{ad}}$ be the number of sampled female adults captured in
+year $y$ at age $a$. We can pool juvenile sampling years because, under this
+example's assumptions, a juvenile's kin probability depends on her birth year,
+not the later year in which she was sampled.
+
+```{r count-samples}
+juvenile_counts <- juveniles |>
+  count(Bju = B, name = "m_ju") |>                   # Pool female juveniles by birth year.
+  complete(Bju = Bju_range, fill = list(m_ju = 0L))  # Include unsampled cohorts in the range.
+
+adult_counts <- adults |>
+  count(Yad = Y, Aad = A, name = "m_ad") |>          # Keep adult sampling year and age together.
+  complete(Yad = Yad_range, Aad = Aad_range, fill = list(m_ad = 0L))
+
+juvenile_counts |> knitr::kable()
+adult_counts |> slice_head(n = 10) |> knitr::kable()
+```
+
+All combinations of an individual from each group give $m_b^{\mathrm{ju}}
+m_{ya}^{\mathrm{ad}}$ comparisons. Mark additionally excludes combinations
+where the putative offspring was born no later than the putative parent:
+
+$$
+C_{bya}=m_b^{\mathrm{ju}}m_{ya}^{\mathrm{ad}}
+        \mathbf{1}\{b>y-a\}.
+$$
+
+This rule does not yet require that the adult was *mature* at the birth. We keep
+that stronger biological condition visible in the probability calculation.
+The adult and juvenile sample sets are disjoint here, so we do not use
+$\binom{m}{2}$ or divide by two: these are directed cross-group comparisons.
+
+```{r count-comparisons}
+comparison_grid <- expand_grid(                  # Enumerate categories, not individual pairs.
+  Bju = Bju_range, Yad = Yad_range, Aad = Aad_range
+) |>
+  left_join(juvenile_counts, by = "Bju", relationship = "many-to-one") |>
+  left_join(adult_counts, by = c("Yad", "Aad"), relationship = "many-to-one") |>
+  mutate(Bad = Yad - Aad,                        # Birth year of adults in this category.
+         birth_order_ok = Bju > Bad,             # Retain only the intended temporal order.
+         n_comp_MOP = as.double(m_ju) * m_ad * birth_order_ok) # Use doubles for large products.
+
+stopifnot(!anyNA(comparison_grid),
+          sum(comparison_grid$n_comp_MOP) <= as.double(nrow(adults)) * nrow(juveniles))
+
+comparison_grid |>
+  summarise(n_categories = n(),
+            categories_with_comparisons = sum(n_comp_MOP > 0),
+            total_comparisons = sum(n_comp_MOP)) |>
+  knitr::kable()
+```
+
+## Count matches using the same keys, including the zeros
+
+Observed matches must be grouped by exactly the same $(b,y,a)$ keys as the
+comparisons. Crucially, starting from the match table alone would omit all
+categories where no match happened. We start from the comparison grid and
+attach the observed match counts, replacing absent counts with explicit zeros.
+
+```{r count-matches}
+match_counts <- analysis_pairs |>
+  count(Bju, Yad, Aad, name = "n_MOP")            # One contribution per identified pair.
+
+# Every retained match must belong to a category with actual comparisons.
+unmatched_categories <- match_counts |>
+  anti_join(filter(comparison_grid, n_comp_MOP > 0), by = c("Bju", "Yad", "Aad"))
+stopifnot(nrow(unmatched_categories) == 0)
+
+categories <- comparison_grid |>
+  filter(n_comp_MOP > 0) |>                       # Zero-comparison categories contribute nothing to this fit.
+  left_join(match_counts, by = c("Bju", "Yad", "Aad"), relationship = "one-to-one") |>
+  replace_na(list(n_MOP = 0L)) |>                 # No recorded match means zero, not missing data.
+  arrange(Bju, Yad, Aad)
+
+stopifnot(sum(categories$n_MOP) == nrow(analysis_pairs),
+          all(categories$n_MOP <= categories$n_comp_MOP),
+          !anyNA(categories))
+
+categories |>
+  select(Bju, Yad, Aad, Bad, m_ju, m_ad, n_comp_MOP, n_MOP) |>
+  slice_head(n = 12) |>
+  knitr::kable(caption = "The comparison-category table: the data input to the likelihood")
+```
+
+That only shows the first 12 rows of pair categories.  
+
+The heatmap below sums comparison counts over adult ages solely to make the sampling
+design easier to see. The likelihood retains those ages as separate categories.
+
+```{r exposure-figure}
+categories |>
+  group_by(Bju, Yad) |>
+  summarise(comparisons = sum(n_comp_MOP), matches = sum(n_MOP), .groups = "drop") |>
+  ggplot(aes(Yad, Bju, fill = comparisons / 1e6)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = matches), size = 3.4) +
+  scale_fill_gradient(low = "#edf5f3", high = "#237e83") +
+  scale_x_continuous(breaks = Yad_range) +
+  scale_y_continuous(breaks = Bju_range) +
+  labs(x = "Adult sampling year", y = "Juvenile birth year", fill = "Comparisons\n(millions)",
+       caption = "Fill: comparison exposure summed over adult ages. Numbers: observed MOPs.")
+```
+
+These preparation steps could be wrapped into `prepare_acme_data()`. We leave
+them expanded so you can inspect the transformations and the analysis choices.
+
+# From parameters to row probabilities
+
+## Biological assumptions and the abundance trajectory
+
+This example has lethal sampling after the breeding season, exact ages,
+knife-edge maturity, and equal reproductive output among mature females.
+Sample selection can depend on adult age: we condition on the recorded age
+and sampling year. Under the example's assumptions there is no additional
+unobserved reproductive difference within those categories that requires a
+selectivity correction. We assume perfect identification of the kin pairs used.
+
+The number of adult females in year $t$ follows
+
+$$N_t=N_{y_0}\exp\{r(t-y_0)\}.$$
+
+We estimate $\theta=(\log N_{y_0},r)$. The first parameter is logged to keep
+abundance positive; $r$ is an instantaneous exponential growth rate, so the
+annual multiplier is $\exp(r)$ and the annual proportional change is
+$\exp(r)-1$. It is not a mortality parameter. This Acme likelihood does not
+need an explicit mortality model because an adult sampled lethally in year $y$
+was necessarily alive in earlier eligible reproductive years.
+
+First calculate the trajectory at illustrative values, before doing any fitting.
+
+```{r illustrative-population}
+theta_start <- c(log_N0 = log(100000), growth_rate = 0.01)
+
+population_at_start <- tibble(year = years) |>
+  mutate(N_female = exp(theta_start[1] + theta_start[2] * (year - y0)))
+
+population_at_start |>
+  ggplot(aes(year, N_female)) +
+  geom_line(color = "#237e83", linewidth = 1) +
+  labs(x = "Year", y = "Adult female abundance",
+       title = "An illustrative trajectory, not an estimate yet")
+```
+
+## Connect each category to the right year
+
+For an adult sampled at age $a$ in year $y$, birth year is $y-a$. That female
+could be the mother of an offspring born in year $b$ only if she was alive and
+mature at that birth. For Acme these conditions give
+
+$$
+p_{bya}(\theta)=
+\mathbf{1}\{b\le y\}\,
+\mathbf{1}\{b\ge y-a+A_{\mathrm{mat}}\}\,
+\frac{1}{N_b(\theta)}.
+$$
+
+The first indicator includes $b=y$: breeding precedes lethal capture in this
+example's annual cycle. The second asks whether her age at the birth,
+$b-(y-a)$, was at least the maturity age. Equal reproductive output then makes
+her probability of being the mother $1/N_b$, **using the offspring's birth
+year, not the adult's capture year**.
+
+The alive/mature conditions depend only on data and known maturity age, so we
+can add them once. The abundance lookup must change whenever parameters change.
+
+```{r row-predictions}
+categories <- categories |>
+  mutate(age_at_birth = Bju - Bad,
+         alive_at_birth = Bju <= Yad,
+         mature_at_birth = age_at_birth >= Amat)
+
+worked_rows <- categories |>
+  left_join(population_at_start, by = c("Bju" = "year"), relationship = "many-to-one") |>
+  mutate(p_MOP = as.numeric(alive_at_birth & mature_at_birth) / N_female,
+         expected_MOP = n_comp_MOP * p_MOP,
+         loglik_piece = dpois(n_MOP, lambda = expected_MOP, log = TRUE))
+
+stopifnot(!anyNA(worked_rows),
+          all(worked_rows$n_MOP[worked_rows$p_MOP == 0] == 0))
+```
+
+There are three distinct reasons to encounter a zero:
+
+1. **No comparisons:** $C_{bya}=0$. These rows were removed from `categories`.
+2. **A match is impossible:** $C_{bya}>0$ but $p_{bya}=0$, because the female
+   was not alive or mature at the offspring's birth. Consistent data then have
+   zero matches, and the log-likelihood contribution is zero.
+3. **A match is possible but none was observed:** $C_{bya}>0$, $p_{bya}>0$,
+   but $k_{bya}=0$. This is informative: its contribution to the log-likelihood is $-C_{bya}p_{bya}$.
+
+```{r inspect-zero-types}
+worked_rows |>
+  mutate(category_type = case_when(
+    p_MOP == 0 ~ "Biologically impossible",
+    n_MOP == 0 ~ "Possible, zero matches",
+    TRUE ~ "Possible, matches observed"
+  )) |>
+  group_by(category_type) |>
+  summarise(categories = n(), comparisons = sum(n_comp_MOP),
+            observed = sum(n_MOP), expected = sum(expected_MOP), .groups = "drop") |>
+  knitr::kable(digits = 3)
+```
+
+The expected number of MOPs above is far less than the observed number of MOPs.
+This is because the values were calculated for $N=100,000$.  So, just from this,
+we know that the female abundance must be quite a bit less than 100,000.  
+
+For a concrete category, the next chunk chooses the row with the most observed
+matches and follows its arithmetic. This choice is just for exposition; all
+rows enter the fit.
+
+```{r follow-one-category}
+example_row <- worked_rows |>
+  slice_max(n_MOP, n = 1, with_ties = FALSE) |>
+  select(Bju, Yad, Aad, age_at_birth, m_ju, m_ad, n_comp_MOP,
+         n_MOP, N_female, p_MOP, expected_MOP, loglik_piece)
+
+knitr::kable(example_row, digits = 7)
+```
+
+In that row, `m_ju * m_ad` supplies the comparisons, the female's age at birth
+establishes maturity, and `N_female` is abundance at `Bju`. Multiplying the
+comparison count by `p_MOP` produces the expected number of matches. The
+observed and expected counts then supply one call to `dpois()`.
+
+# Sum the Poisson contributions and fit the model
+
+## The working likelihood
+
+With rare matches, we use the independent-Poisson pseudolikelihood model for each
+category's match count $K_{bya}$:
+
+$$
+K_{bya}\sim\operatorname{Poisson}(\lambda_{bya}),\qquad
+\lambda_{bya}=C_{bya}p_{bya}(\theta).
+$$
+
+The log likelihood is
+
+$$
+\ell(\theta)=\sum_{(b,y,a):\,C_{bya}>0}
+\left[k_{bya}\log\lambda_{bya}-\lambda_{bya}-\log(k_{bya}!)\right].
+$$
+
+The limits are precisely the possible pair categories constructed above,
+including those categories with zero MOPs. R's `dpois()` handles the boundary
+$k=\lambda=0$ correctly; its log probability is zero. A positive observed count
+with zero expected count has log probability $-\infty$. We do not silently
+remove invalid probabilities with `na.rm = TRUE`.
+
+Comparisons sharing animals are not literally independent in every sampling
+regime. This is the same Poisson approximation used in the original fit, not
+a new claim that table aggregation makes the comparisons independent.
+
+```{r sum-at-start}
+loglik_at_start <- sum(worked_rows$loglik_piece)
+loglik_at_start
+```
+
+## Repeat that calculation for new parameters
+
+An optimizer needs to evaluate the same calculation many times. Now that we
+have seen every step, a function is useful. We keep the data as an explicit
+argument. `match()` connects each category's birth year to an element of the
+one-dimensional abundance vector, accomplishing the same year lookup that
+Mark's `N_Y[Bju]` offarray indexing provides.
+
+```{r likelihood-function}
+#' Log likelihood for the female-only Acme adult-to-juvenile comparison design
+#' @param par Numeric vector: log adult female abundance at y0, then exponential growth rate.
+#' @param categories Prepared comparison table, including the fixed alive/mature flags.
+#' @param years Integer years supporting every juvenile-birth-year lookup.
+#' @param y0 Fixed reference year defining the first parameter.
+#' @return Scalar Poisson log likelihood; invalid numerical trajectories return -Inf.
+acme_loglik <- function(par, categories, years, y0) {
+  N_year <- exp(par[1] + par[2] * (years - y0))
+  N_at_birth <- N_year[match(categories$Bju, years)]
+  if (any(!is.finite(N_at_birth)) || any(N_at_birth <= 0)) return(-Inf)
+
+  p_MOP <- as.numeric(categories$alive_at_birth & categories$mature_at_birth) / N_at_birth
+  expected <- categories$n_comp_MOP * p_MOP
+  sum(dpois(categories$n_MOP, lambda = expected, log = TRUE))
+}
+
+stopifnot(isTRUE(all.equal(
+  acme_loglik(theta_start, categories, years, y0), loglik_at_start
+)))
+```
+
+`nlminb()` minimizes, so we give it the negative log likelihood. The small
+anonymous function below adapts our ordinary function to the optimizer; the
+category table is still an explicit argument to `acme_loglik()`.
+
+```{r optimize}
+fit <- nlminb(
+  start = theta_start,
+  objective = function(par) -acme_loglik(par, categories, years, y0)
+)
+stopifnot(fit$convergence == 0)
+
+tibble(quantity = c(paste0("Adult females in ", y0),
+                    "Instantaneous annual growth rate", "Annual proportional change"),
+       estimate = c(exp(fit$par[1]), fit$par[2], expm1(fit$par[2]))) |>
+  knitr::kable(digits = 5)
+fit$message
+```
+
+# Inspect the fitted model
+
+We repeat the same row prediction calculation at the fitted parameters. This
+creates a directly inspectable table; calling the likelihood has not secretly
+updated any shared environment.
+
+```{r fitted-predictions}
+fitted_population <- tibble(year = years) |>
+  mutate(N_female = exp(fit$par[1] + fit$par[2] * (year - y0)))
+
+fitted_rows <- categories |>
+  left_join(fitted_population, by = c("Bju" = "year"), relationship = "many-to-one") |>
+  mutate(p_MOP = as.numeric(alive_at_birth & mature_at_birth) / N_female,
+         expected_MOP = n_comp_MOP * p_MOP,
+         loglik_piece = dpois(n_MOP, expected_MOP, log = TRUE))
+
+fitted_rows |>
+  summarise(categories = n(), comparisons = sum(n_comp_MOP),
+            observed_MOPs = sum(n_MOP), expected_MOPs = sum(expected_MOP),
+            log_likelihood = sum(loglik_piece)) |>
+  knitr::kable(digits = 4)
+```
+
+With a freely estimated overall abundance scale, this fit should reproduce
+the total number of observed pairs very closely. That is a useful arithmetic
+check, but it does not establish that the model captures the pattern across
+years or adult ages.
+
+```{r check-total-and-diagnostics}
+stopifnot(abs(sum(fitted_rows$n_MOP) - sum(fitted_rows$expected_MOP)) < 0.01)
+
+fitted_rows |>
+  group_by(Bju) |>
+  summarise(Observed = sum(n_MOP), Expected = sum(expected_MOP), .groups = "drop") |>
+  pivot_longer(c(Observed, Expected), names_to = "series", values_to = "pairs") |>
+  ggplot(aes(Bju, pairs, color = series, shape = series)) +
+  geom_line() + geom_point(size = 2.5) +
+  scale_x_continuous(breaks = Bju_range) +
+  scale_color_manual(values = c(Observed = "#233a3d", Expected = "#237e83")) +
+  labs(x = "Offspring birth year", y = "Mother-daughter pairs", color = NULL, shape = NULL,
+       caption = "Counts summed over adult sampling years and ages; no refitting by cohort.")
+```
+
+## Approximate uncertainty in the abundance trajectory
+
+### Uncertainty in the fitted parameters
+
+The Hessian (the matrix of second derivatives) of the **negative** log likelihood
+describes its curvature at the fitted parameter values. Under our working
+Poisson model, its inverse, $V_\theta$, estimates the **sampling covariance
+matrix of the parameter estimates**. To keep the notation compact, write
+
+$$
+\alpha=\log N_{y_0},\qquad
+\theta=\begin{pmatrix}\alpha\\r\end{pmatrix},\qquad
+\widehat\theta=\begin{pmatrix}\widehat\alpha\\\widehat r\end{pmatrix}.
+$$
+
+Then
+
+$$
+V_\theta\approx\operatorname{Cov}(\widehat\theta)
+=\begin{pmatrix}
+\operatorname{Var}(\widehat\alpha) & \operatorname{Cov}(\widehat\alpha,\widehat r)\\
+\operatorname{Cov}(\widehat\alpha,\widehat r) & \operatorname{Var}(\widehat r)
+\end{pmatrix}.
+$$
+
+The hats matter. In this interpretation the true parameters are fixed but
+unknown; estimates would vary across repeated datasets. The diagonal entries
+describe the variances of those estimates, and the off-diagonal entries describe
+how they vary together. Because we fit **log abundance**, the first entry
+concerns $\widehat\alpha=\log\widehat N_{y_0}$, not $\widehat N_{y_0}$ itself.
+
+### What if we want uncertainty in a function of the parameters?
+
+That covariance matrix gets us uncertainty for the fitted parameters. But our
+biological question may concern a **function** of those parameters. For example,
+what is the variance of estimated log abundance in another year, $t$?
+
+The model tells us that
+
+$$
+g_t(\theta)=\log N_t=\alpha+r(t-y_0),
+$$
+and, because the maximum likelihood estimate of a function is just that function
+of the MLE, it follows that the MLE for $g_t(\theta)$ is found by substituting the MLEs for
+$\alpha$ and $r$ into the above:
+$$
+g_t(\widehat\theta)=\log\widehat N_t=\widehat\alpha+\widehat r(t-y_0).
+$$
+
+Uncertainty in both estimates, and their covariance, therefore contributes to
+uncertainty in $\log\widehat N_t$.
+
+The **delta method** propagates uncertainty through a smooth function using a
+first-order Taylor approximation. Locally, we replace the function with a line
+(or a plane when there are several parameters). The derivatives tell us how
+strongly a change in each parameter affects the quantity of interest. If $g$
+is a scalar function of our parameter vector, the approximation is
+
+$$
+g(\widehat\theta)\approx
+g(\theta)+\nabla g(\theta)^\top(\widehat\theta-\theta),
+$$
+
+where $\nabla g$ is the column vector of first derivatives. Taking the variance
+of this linear expression gives
+
+$$
+\operatorname{Var}\{g(\widehat\theta)\}\approx
+\nabla g(\theta)^\top\operatorname{Cov}(\widehat\theta)\nabla g(\theta).
+$$
+
+We do not know the true parameters or their sampling covariance. In practice,
+we evaluate the derivatives at $\widehat\theta$ and substitute $V_\theta$ for
+the covariance matrix. This is how derivatives connect uncertainty in the
+original estimates to uncertainty in a derived quantity.
+
+### Apply it to log abundance in year t
+
+For our particular function $g_t$, the derivatives are simple:
+
+$$
+\frac{\partial g_t}{\partial\alpha}=1,\qquad
+\frac{\partial g_t}{\partial r}=t-y_0,\qquad
+\nabla g_t=\begin{pmatrix}1\\t-y_0\end{pmatrix}.
+$$
+
+Writing out the variance of $\widehat\alpha+\widehat r(t-y_0)$ gives
+
+$$
+\begin{aligned}
+\operatorname{Var}(\log\widehat N_t)
+={}&\operatorname{Var}(\widehat\alpha)
+ +(t-y_0)^2\operatorname{Var}(\widehat r)\\
+ &+2(t-y_0)\operatorname{Cov}(\widehat\alpha,\widehat r).
+\end{aligned}
+$$
+
+This shows why we need the **covariance**, not just the two parameter variances.
+Depending on its sign and the year of interest, the covariance term can increase
+or decrease the resulting variance. The same calculation in compact matrix
+notation, substituting our estimated covariance matrix, is
+
+$$
+\widehat{\operatorname{Var}}(\log\widehat N_t)
+=(1,\ t-y_0)\,V_\theta\,(1,\ t-y_0)^\top.
+$$
+
+**The covariance transformation is exact here:** $g_t$ is linear in
+$(\alpha,r)$, so there are no higher-order Taylor terms to discard. The result
+still uses an approximate, estimated sampling covariance matrix, however.
+The delta method also works as a first-order approximation for nonlinear
+functions, such as $N_t=\exp\{\alpha+r(t-y_0)\}$; for those functions the local
+linear approximation itself introduces an additional approximation.
+
+### Connect the derivatives to the R calculation
+
+For several years, we stack the derivative vectors horizontally as rows of
+`log_N_jacobian`. Its first column is one and its second is `years - y0`.
+This matrix is called a **Jacobian**; each row is one year's gradient, written
+as a row instead of a column. Multiplying it by `V_theta`, multiplying the
+result elementwise by the Jacobian, and summing each row calculates the
+quadratic form above separately for each year. Taking square roots gives the
+standard errors of estimated log abundance.
+
+We form approximate normal intervals on the **log scale**, then exponentiate
+their endpoints to express them as positive abundance limits. These are
+pointwise, approximate model-based intervals. They inherit the Poisson working
+model's assumptions; they are not simultaneous confidence bands and do not
+account for every possible source of model misspecification. The exact linear
+covariance transformation does not make these confidence intervals exact.
+
+```{r abundance-intervals}
+information <- optimHess(
+  fit$par, function(par) -acme_loglik(par, categories, years, y0)
+)
+stopifnot(all(eigen(information, symmetric = TRUE, only.values = TRUE)$values > 0))
+V_theta <- solve(information)
+log_N_jacobian <- cbind(1, years - y0)              # One row of derivatives for each year.
+var_log_N <- rowSums((log_N_jacobian %*% V_theta) * log_N_jacobian)
+se_log_N <- sqrt(var_log_N)                        # Convert estimated variances to standard errors.
+
+fitted_population <- fitted_population |>
+  mutate(lower = exp(log(N_female) - 1.96 * se_log_N),
+         upper = exp(log(N_female) + 1.96 * se_log_N))
+
+fitted_population |>
+  ggplot(aes(year, N_female)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "#237e83", alpha = 0.18) +
+  geom_line(color = "#237e83", linewidth = 1) +
+  labs(x = "Year", y = "Adult female abundance",
+       caption = "Ribbon: approximate pointwise 95% intervals under the Poisson working model.")
+```
+
+The points most directly informing abundance are offspring birth years.
+Extending the line through the last adult sampling year uses the assumed
+exponential trajectory; the last adult capture year need not itself be a
+sampled offspring cohort. Interval width reflects parameter uncertainty,
+not uncertainty about whether that trajectory is biologically correct.
+
+# Optional: verify agreement with Mark's implementation
+
+This section is an independent check, not a prerequisite for the tidy analysis.
+If Mark's packages are available, we source **only his function definitions**,
+not the interactive driver script. We compare categories by explicit keys,
+then compare likelihood values at the starting values, fitted values, and
+several other parameter vectors. We also fit the original likelihood from
+the same starting values.
+
+This is the one section where we deliberately use Mark's environment interface.
+You can set `check_mark_code: false` in the YAML header to omit it. If the
+required packages are unavailable, the section prints an explanation and
+leaves all the earlier analysis usable.
+
+```{r compare-with-mark, message=FALSE}
+mark_repo <- dirname(dirname(data_path))
+mark_functions <- file.path(mark_repo, "r-scripts", "ckmr_funs.r")
+mark_packages <- c("mvbutils", "offarray", "atease")
+can_check <- isTRUE(params$check_mark_code) && file.exists(mark_functions) &&
+  all(vapply(mark_packages, requireNamespace, logical(1), quietly = TRUE))
+
+if (can_check) {
+  library(mvbutils)
+  library(offarray)
+  library(atease)
+  mark_code <- new.env(parent = globalenv())
+  sys.source(mark_functions, envir = mark_code)
+
+  mark_loglik <- mark_code$generic_lglk_MOP_ideal_mammal
+  mark_env <- mark_code$boring_data_prep_delfi_A(
+    raw_data, prev_env = environment(mark_loglik)
+  )
+  environment(mark_loglik) <- mark_env
+
+  mark_categories <- as_tibble(mark_env$POP_df) |>
+    dplyr::arrange(Bju, Yad, Aad)
+  tidy_categories <- categories |>
+    dplyr::select(Bju, Yad, Aad, n_comp_MOP, n_MOP) |>
+    dplyr::arrange(Bju, Yad, Aad)
+
+  stopifnot(nrow(mark_categories) == nrow(tidy_categories))
+  for (column in names(tidy_categories)) {
+    stopifnot(isTRUE(all.equal(as.numeric(tidy_categories[[column]]),
+                              as.numeric(mark_categories[[column]]))))
+  }
+
+  parameter_checks <- tibble(
+    label = c("Starting values", "Tidy optimum", "Smaller, declining", "Larger, growing", "Constant"),
+    log_N0 = c(theta_start[1], fit$par[1], log(30000), log(300000), log(100000)),
+    growth_rate = c(theta_start[2], fit$par[2], -0.03, 0.04, 0)
+  )
+  parameter_checks$tidy_loglik <- mapply(
+    function(n, r) acme_loglik(c(n, r), categories, years, y0),
+    parameter_checks$log_N0, parameter_checks$growth_rate
+  )
+  parameter_checks$mark_loglik <- mapply(
+    function(n, r) mark_loglik(c(n, r)),
+    parameter_checks$log_N0, parameter_checks$growth_rate
+  )
+  parameter_checks$difference <- parameter_checks$tidy_loglik - parameter_checks$mark_loglik
+  stopifnot(max(abs(parameter_checks$difference)) < 1e-7)
+
+  mark_fit <- nlminb(theta_start, function(par) -mark_loglik(par))
+  stopifnot(mark_fit$convergence == 0,
+            max(abs(mark_fit$par - fit$par)) < 1e-4,
+            abs(mark_fit$objective - fit$objective) < 1e-6)
+
+  knitr::kable(parameter_checks, digits = 8)
+} else {
+  cat("Original-code cross-check skipped. It requires check_mark_code = TRUE,\n",
+      "r-scripts/ckmr_funs.r beside the datasets directory, and packages:\n",
+      paste(mark_packages, collapse = ", "), ".\n",
+      "The tidy analysis above uses none of those packages.\n", sep = "")
+}
+```
+
+# What we have separated
+
+The fitted data are `categories`: one row per possible comparison
+category, including zero matches. `fitted_rows` makes the link from those data
+to abundance, kin probability, expected matches, and log-likelihood contributions
+visible. `fit` contains the optimizer's result. None depends on reading the
+simulator's secret population truth.
+
+The data preparation could become `prepare_acme_data()`, and the prediction
+steps could become `predict_acme_pairs()`. For this first example, keeping
+those steps visible makes the relationship between biology, counting, and
+probability easier to inspect. Later examples can collect more involved
+calculations into functions, grouped in one example-specific file in order of use.
+
+Useful experiments are to change the illustrative parameter vector, inspect
+different category rows, or plot the fitted residual pattern by adult capture
+age. Changing the maturity rule, the age roles used for comparisons, or lethal
+versus non-lethal sampling changes the model or comparison design and requires
+consistent changes to preparation and probabilities; it is more than a display
+option.
+
+# Optional: faster evaluation and automatic differentiation with RTMB
+
+So far we have written an ordinary R likelihood and used numerical derivatives
+for its Hessian. We can now introduce RTMB without changing the model, the
+comparison design, or our tidy representation of the observations. This section
+uses the same data and parameters, and checks that the results agree.
+
+## What RTMB changes, and why it can be faster
+
+With TMB's usual C++ interface, we write a C++ objective and compile a model
+library. **With RTMB, we write the objective in R.** `MakeADFun()` evaluates that
+function with special automatic-differentiation objects in place of the ordinary
+parameters, recording the arithmetic on an AD *tape*. Repeated objective and
+derivative evaluations then use the compiled TMB machinery to execute that
+recorded calculation. Here, we implement our negative log-likelihood in R
+and give that to RTMB to make an autodiff function.
+
+Execution speed is a major reason to use it. A realistic fit may need thousands
+of evaluations of a much larger model. Executing a recorded calculation avoids
+repeating the R-level orchestration, and autodiff avoids the many perturbed
+objective evaluations needed for finite-difference derivatives. We do not expect
+large speed differences in this tiny two-parameter example.
+
+Autodiff also gives derivatives by applying the chain rule to the recorded
+operations. Recall from your days in calculus that taking derivatives was
+pretty straightforward---there were never any surprises and it was always based
+on simple-to-implement rules.  This has allowed computers to take write down the
+computer code to evaluate the derivative of a function defined in computer code
+for some time.  RTMB allows that to happen to functions written in R.
+
+
+This introduction follows the [RTMB interface documentation](https://search.r-project.org/CRAN/refmans/RTMB/html/TMB-interface.html)
+and [reference manual](https://kaskr.r-universe.dev/RTMB/doc/manual.html).
+
+```{r rtmb-availability}
+run_rtmb <- isTRUE(params$use_rtmb) && requireNamespace("RTMB", quietly = TRUE)
+if (run_rtmb) {
+  cat("Running the optional section with RTMB", as.character(packageVersion("RTMB")), "\n")
+} else {
+  cat("RTMB section skipped. Install RTMB and set use_rtmb: true to execute it.\n",
+      "The ordinary R analysis above is complete without RTMB.\n", sep = "")
+}
+```
+
+If needed, run `install.packages("RTMB")` yourself, then restart the notebook.
+We do not install packages automatically. All executable chunks below are
+conditional on `run_rtmb`, so the document still knits when RTMB is absent or
+when `use_rtmb: false` is set in the YAML header.
+
+## Prepare the fixed inputs before recording the calculation
+
+The observed counts, comparison counts, birth-year lookup indices, and
+alive/mature conditions do not depend on the parameters. We can calculate them
+once, leaving only the parameter-dependent arithmetic inside the taped function.
+The category data frame remains our inspectable record of what was compared.
+
+We first handle **structural zeros**, not sampling zeros. A category that is
+biologically impossible for every parameter value has $p=0$ and must have
+observed count zero. Its Poisson log probability is always zero, so we can
+omit it without changing the likelihood or its derivatives. Boundary
+expressions involving $\log(0)$ can cause problems in AD implementations;
+removing these fixed, identically zero contributions avoids relying on how
+a particular RTMB version handles that boundary. (Recall, above, that we relied on the
+fact that `dpois(0,0)` returns 1, so its log is 0.  We can't do that with AD,
+and, generally, if there are some categories that have 0 probability of having
+any kin matches, it is probably better practice to remove them first, like we
+are doing here, anyway).
+
+**We retain all possible categories with zero observed matches.** They have
+positive expected counts and contribute information. The filter below uses
+known biology, not whether a match happened. We check the discarded counts
+before filtering, so an inconsistent positive count cannot silently disappear.
+
+```{r rtmb-fixed-data, eval=run_rtmb}
+eligible_for_ad <- categories$alive_at_birth & categories$mature_at_birth
+stopifnot(!anyNA(eligible_for_ad),
+          all(categories$n_MOP[!eligible_for_ad] == 0))
+
+ad_categories <- categories |>
+  filter(alive_at_birth, mature_at_birth)           # Fixed structural-zero filter, not n_MOP > 0.
+
+ad_data <- list(
+  n_MOP = as.numeric(ad_categories$n_MOP),           # Fixed observations can be ordinary numeric vectors.
+  n_comp_MOP = ad_categories$n_comp_MOP,
+  log_comparisons = log(ad_categories$n_comp_MOP),  # Fixed log of num pairwise comparisons per category: calculate once.
+  birth_index = match(ad_categories$Bju, years),    # Same year lookup as the ordinary R function, but do it outside of objective function
+  years = years,
+  y0 = y0
+)
+stopifnot(nrow(ad_categories) > 0, !anyNA(ad_data$birth_index),
+          all(ad_data$n_comp_MOP > 0))
+
+tibble(quantity = c("Original category rows", "Fixed structural-zero (biologically impossible) rows omitted",
+                    "Rows retained for AD", "Retained rows with zero observed matches"),
+       n = c(nrow(categories), sum(!eligible_for_ad), nrow(ad_categories),
+             sum(ad_categories$n_MOP == 0))) |>
+  knitr::kable()
+```
+
+## A slightly adjusted negative log likelihood
+
+We continue with the **parameter-vector approach**, in the same order as before:
+`par[1]` is $\log N_{y_0}$ and `par[2]` is $r$. RTMB also accepts named parameter
+lists. Its `getAll()` helper can unpack named parameter or data lists into local
+variables inside a function. We do not need that convenience here.
+
+For the retained categories the eligibility indicators are one. Hence
+
+$$
+\lambda_j=C_j/N_{b_j},\qquad
+\log\lambda_j=\log C_j-
+\left[\theta_1+\theta_2(b_j-y_0)\right].
+$$
+
+The new function uses this equivalent log-mean calculation and returns the
+**negative** log likelihood directly. Compare it with `acme_loglik()` above:
+
+* Data and lookup indices are prepared outside the function; there are no joins
+  to repeat during differentiation.
+* `RTMB::dpois()` explicitly selects the AD-compatible distribution function.
+  It also works with ordinary numeric inputs, which lets us check the function
+  before recording anything.
+* We remove the parameter-dependent `is.finite()`/`if` guard. The parameters are
+  AD objects during recording, and such ordinary R checks do not generally
+  describe a differentiable computation on active parameters.
+* We do **not** use `as.numeric()` on parameter-dependent quantities. Doing so
+  would discard their AD information or fail. The conversion of fixed observed
+  counts above is harmless.
+
+```{r rtmb-objective-function, eval=run_rtmb}
+#' AD-compatible negative log likelihood for the prepared Acme categories
+#' @param par Parameter vector: log female abundance at y0, then growth rate.
+#' @param data Fixed inputs prepared in ad_data, including positive comparison exposure.
+#' @return Scalar negative Poisson log likelihood, numeric or an RTMB AD object.
+acme_nll_rtmb <- function(par, data) {
+  log_N_year <- par[1] + par[2] * (data$years - data$y0)
+  log_lambda <- data$log_comparisons - log_N_year[data$birth_index]
+  lambda <- exp(log_lambda)
+  -sum(RTMB::dpois(data$n_MOP, lambda = lambda, log = TRUE))
+}
+
+ordinary_nll <- function(par) -acme_loglik(par, categories, years, y0)
+acme_nll_rtmb(theta_start, ad_data)                 # Still ordinary R evaluation at this point.
+stopifnot(abs(acme_nll_rtmb(theta_start, ad_data) - ordinary_nll(theta_start)) < 1e-7)
+```
+
+## Construct the tape and inspect what it returns
+
+`MakeADFun()` expects a function with a single parameter argument. Our short
+anonymous-function wrapper, below, 
+supplies `ad_data` explicitly to the two-argument function, just as our
+earlier optimizer wrapper supplied `categories` to `acme_loglik()`. This is
+ordinary R function scoping; we are not replace a function's environment or
+doing anything fancy there.
+
+```{r rtmb-make-objective, eval=run_rtmb}
+ad <- RTMB::MakeADFun(
+  func = function(par) acme_nll_rtmb(par, data = ad_data),
+  parameters = theta_start,
+  silent = TRUE
+)
+
+ad$par                  # Starting parameter vector, in our original order.
+ad$fn(theta_start)       # Negative log likelihood.
+ad$gr(theta_start)       # First derivatives: one entry per parameter.
+ad$he(theta_start)       # Hessian: the matrix of second derivatives.
+```
+
+The tape incorporates the fixed inputs used when it was constructed. **If we
+change the samples, categories, maturity rule, or lookup structure, we rebuild
+the AD object.** Editing the original data frame after constructing `ad` does
+**not** update the recorded objective. Tape construction is a one-time cost for a
+given prepared model, not a step to repeat inside the optimizer.
+
+Before fitting, we compare values away from the optimum too. Agreement at only
+one point would not establish that two functions describe the same surface.
+
+```{r rtmb-check-values, eval=run_rtmb}
+ad_checks <- tibble(
+  label = c("Starting values", "Ordinary R optimum", "Declining", "Growing"),
+  log_N0 = c(theta_start[1], fit$par[1], log(30000), log(300000)),
+  growth_rate = c(theta_start[2], fit$par[2], -0.03, 0.04)
+)
+ad_checks$R_nll <- mapply(function(n, r) ordinary_nll(c(n, r)),
+                         ad_checks$log_N0, ad_checks$growth_rate)
+ad_checks$RTMB_nll <- mapply(function(n, r) ad$fn(c(n, r)),
+                            ad_checks$log_N0, ad_checks$growth_rate)
+ad_checks$difference <- ad_checks$RTMB_nll - ad_checks$R_nll
+stopifnot(max(abs(ad_checks$difference)) < 1e-7)
+knitr::kable(ad_checks, digits = 8)
+```
+
+We can also check an AD gradient against a central finite difference, perturbing
+one parameter at a time while holding the other fixed:
+
+$$
+\frac{\partial f}{\partial\theta_i}
+\approx\frac{f(\theta+h_i e_i)-f(\theta-h_i e_i)}{2h_i}.
+$$
+
+We do this at the starting values, where the derivatives are appreciably
+different from zero. Finite differences have step-size error; they are a useful
+check, not the definition of the AD derivative.
+
+```{r rtmb-check-gradient, eval=run_rtmb}
+step <- c(1e-5, 1e-6)
+finite_difference <- vapply(seq_along(theta_start), function(i) {
+  offset <- numeric(length(theta_start))
+  offset[i] <- step[i]
+  (ordinary_nll(theta_start + offset) - ordinary_nll(theta_start - offset)) / (2 * step[i])
+}, numeric(1))
+ad_gradient <- as.numeric(ad$gr(theta_start))
+stopifnot(max(abs(finite_difference - ad_gradient) / (1 + abs(ad_gradient))) < 1e-5)
+tibble(parameter = names(theta_start), finite_difference = finite_difference,
+       autodiff = ad_gradient, difference = ad_gradient - finite_difference) |>
+  knitr::kable(digits = 7)
+```
+
+## Fit with the same optimizer, now supplying the gradient
+
+The optimizer remains `nlminb()`. It now receives an efficient objective and
+its AD gradient, rather than requesting numerical objective perturbations to
+approximate that gradient. We use the original starting values, not the earlier
+optimum, so this is a separate fit.
+
+```{r rtmb-fit, eval=run_rtmb}
+fit_rtmb <- nlminb(start = ad$par, objective = ad$fn, gradient = ad$gr)
+
+# just catch if something went awry
+stopifnot(fit_rtmb$convergence == 0,
+          max(abs(fit_rtmb$par - fit$par)) < 1e-4,
+          abs(fit_rtmb$objective - fit$objective) < 1e-6,
+          max(abs(ad$gr(fit_rtmb$par))) < 0.01)
+
+tibble(parameter = names(theta_start), ordinary_R = fit$par,
+       RTMB = fit_rtmb$par, difference = fit_rtmb$par - fit$par) |>
+  knitr::kable(digits = 9)
+```
+
+## Reuse the manual delta method with the AD Hessian
+
+`ad$he()` supplies the Hessian of the negative log likelihood. This is observed
+curvature at the fitted parameters, not the expected information calculation
+used for planning a study (which we will see in a few days!). We invert it and use the covariance propagation
+derived in [the earlier delta-method explanation](#approximate-uncertainty-in-the-abundance-trajectory).
+Each row of `log_N_jacobian` is the gradient
+$(1,t-y_0)$ of one year's log abundance with respect to the parameters.
+
+```{r rtmb-manual-delta, eval=run_rtmb}
+H_rtmb <- ad$he(fit_rtmb$par)
+stopifnot(all(eigen(H_rtmb, symmetric = TRUE, only.values = TRUE)$values > 0))
+V_rtmb <- solve(H_rtmb)
+log_N_jacobian <- cbind(1, years - y0)
+log_N_rtmb <- fit_rtmb$par[1] + fit_rtmb$par[2] * (years - y0)
+se_log_N_rtmb <- sqrt(rowSums((log_N_jacobian %*% V_rtmb) * log_N_jacobian))
+
+rtmb_intervals <- tibble(
+  year = years,
+  N_female = exp(log_N_rtmb),
+  se_log_N = se_log_N_rtmb,
+  lower = exp(log_N_rtmb - 1.96 * se_log_N_rtmb),
+  upper = exp(log_N_rtmb + 1.96 * se_log_N_rtmb)
+)
+knitr::kable(rtmb_intervals, digits = 4)
+```
+
+The estimates and intervals should closely match those from the numerical
+Hessian, allowing for numerical differentiation and optimization tolerances.
+Autodiff changes how we calculate derivatives; it does not change the likelihood
+or remove the assumptions behind these uncertainty intervals.
+
+## Ask RTMB to propagate uncertainty: ADREPORT and sdreport
+
+For this model, differentiating $\log N_t$ by hand is easy. In a larger model,
+the quantity of interest might be a complicated function of many parameters.
+`ADREPORT()` marks derived quantities for automatic uncertainty propagation;
+`sdreport()` then uses their AD Jacobians and the fitted parameter covariance
+to apply the delta method. It does not simulate a sampling distribution or
+construct a profile likelihood.
+
+We add a reporting wrapper that marks both log abundance and abundance itself.
+It returns the same negative log likelihood as before. `ADREPORT()` is called
+inside the objective being recorded, so adding these reports requires a new
+AD object. We do not need to refit: this new object represents the same
+objective, and we pass the already fitted parameters explicitly to `sdreport()`.
+
+```{r rtmb-reporting, eval=run_rtmb}
+acme_nll_with_reports <- function(par) {
+  log_N_ad <- par[1] + par[2] * (ad_data$years - ad_data$y0)
+  N_ad <- exp(log_N_ad)
+  RTMB::ADREPORT(log_N_ad)
+  RTMB::ADREPORT(N_ad)
+  acme_nll_rtmb(par, data = ad_data)
+}
+
+ad_reporting <- RTMB::MakeADFun(acme_nll_with_reports, theta_start, silent = TRUE)
+stopifnot(abs(ad_reporting$fn(fit_rtmb$par) - ad$fn(fit_rtmb$par)) < 1e-7)
+ad_sdr <- RTMB::sdreport(ad_reporting, par.fixed = fit_rtmb$par,
+                         hessian.fixed = H_rtmb)
+stopifnot(isTRUE(ad_sdr$pdHess))
+reported <- summary(ad_sdr, "report")
+reported_log_N <- reported[rownames(reported) == "log_N_ad", , drop = FALSE]
+reported_N <- reported[rownames(reported) == "N_ad", , drop = FALSE]
+stopifnot(nrow(reported_log_N) == length(years), nrow(reported_N) == length(years))
+
+report_comparison <- tibble(
+  year = years,
+  log_N = reported_log_N[, "Estimate"],
+  manual_se_log_N = se_log_N_rtmb,
+  sdreport_se_log_N = reported_log_N[, "Std. Error"],
+  difference = sdreport_se_log_N - manual_se_log_N,
+  N_female = reported_N[, "Estimate"],
+  sdreport_se_N = reported_N[, "Std. Error"]
+)
+stopifnot(max(abs(report_comparison$log_N - log_N_rtmb)) < 1e-7,
+          max(abs(report_comparison$difference)) < 1e-6,
+          max(abs(report_comparison$sdreport_se_N - exp(log_N_rtmb) * se_log_N_rtmb)) < 1e-4)
+knitr::kable(report_comparison, digits = 7)
+```
+
+We explicitly supply the AD Hessian as `hessian.fixed`, so `sdreport()` uses
+the same parameter information matrix as our manual calculation. Without that
+argument, the installed TMB implementation can construct its Hessian by
+numerically differentiating the AD gradient. That is usually close, but using
+the same Hessian makes this an unambiguous check of the propagation step.
+
+The standard errors of log abundance should agree with the manual calculation
+to numerical precision. For abundance itself the first-order delta method gives
+$\operatorname{SE}(\widehat N_t)\approx\widehat N_t\operatorname{SE}(\log\widehat N_t)$;
+the last check verifies that relationship too.
+
+To reproduce the earlier positive confidence limits, use the **log-scale**
+reports and then exponentiate:
+
+```{r rtmb-reported-intervals, eval=run_rtmb}
+reported_intervals <- report_comparison |>
+  transmute(year, N_female,
+            lower = exp(log_N - 1.96 * sdreport_se_log_N),
+            upper = exp(log_N + 1.96 * sdreport_se_log_N))
+stopifnot(max(abs(reported_intervals$lower - rtmb_intervals$lower)) < 1e-4,
+          max(abs(reported_intervals$upper - rtmb_intervals$upper)) < 1e-4)
+knitr::kable(reported_intervals, digits = 4)
+```
+
+Using $\widehat N\pm1.96\operatorname{SE}(\widehat N)$ instead would produce
+normal intervals on the abundance scale, not these exponentiated log-scale
+intervals. Both use first-order uncertainty propagation, but their interval
+endpoints are not identical. `sdreport()` supplies standard errors; the scale
+and interpretation of our confidence limits remain modeling choices.
+
+We have now connected the same category table to an ordinary R fit, a recorded
+RTMB fit, a manually propagated covariance calculation, and an automatically
+propagated one. No random effects or Laplace approximation are needed for this
+Acme model; those are additional capabilities we can introduce with examples
+that actually need them.
+
+```{r session-information}
+sessionInfo()
+```

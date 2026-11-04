@@ -10,7 +10,7 @@ output:
     theme: readable
     self_contained: true
 params:
-  data_path: "../.can24/datasets/samp_delfi_A.rda"
+  data_path: "../.hawaii-ckmr-26/datasets/samp_delfi_A.rda"
   check_mark_code: true
   use_rtmb: true
 ---
@@ -47,7 +47,7 @@ options(dplyr.summarise.inform = FALSE)
 # Knit supplies params from the YAML header. Supply the same defaults when
 # someone runs the chunks manually in a fresh R session instead.
 if (!exists("params", inherits = FALSE)) {
-  params <- list(data_path = "../.can24/datasets/samp_delfi_A.rda",
+  params <- list(data_path = "../.hawaii-ckmr-26/datasets/samp_delfi_A.rda",
                  check_mark_code = TRUE, use_rtmb = TRUE)
 }
 ```
@@ -55,8 +55,10 @@ if (!exists("params", inherits = FALSE)) {
 # What we will do
 
 This notebook follows the Acme Archipelago example in Mark Bravington's
-`fit_delfi_A.r` and `Delfinus.pdf`. We use his original simulated dataset and
-the same female-only, adult-to-juvenile comparison design and Poisson pseudo-likelihood. The change is how we expose the calculations: individual records,
+`fit_delfi_A.r`, using the revised dataset and analysis in his 2026 Hawaii
+course repository. We use the same female-only comparison design and Poisson
+pseudo-likelihood: potential parents are mature at sampling, and potential
+offspring are born in or after a chosen year, even if sampled as adults. The change is how we expose the calculations: individual records,
 comparison categories, and predictions are ordinary data frames.
 
 We leave the preparation steps expanded so you can run each chunk and inspect
@@ -97,12 +99,6 @@ this chunk, or change `params$data_path` in the YAML header.
 ```{r data-path}
 data_path <- params$data_path  # Change to the location of Mark's simulated dataset.
 
-# This CKMRshiny checkout calls its link .can24, rather than .can2024.
-# Use that spelling only if the unchanged default is unavailable locally.
-if (identical(data_path, "../.can2024/datasets/samp_delfi_A.rda") &&
-    !file.exists(data_path) && file.exists("../.can24/datasets/samp_delfi_A.rda")) {
-  data_path <- "../.can24/datasets/samp_delfi_A.rda"
-}
 if (!file.exists(data_path)) {
   stop("Set data_path to your copy of datasets/samp_delfi_A.rda in Mark's repository.")
 }
@@ -114,6 +110,11 @@ An `.rda` file stores named R objects, rather than just a single table. We load
 it into a temporary container so its object names cannot overwrite notebook
 variables. This one use of an environment is only a safe file-loading device;
 we do not use environments to pass data to the likelihood.
+
+If `kinsimmer2` is not installed, `load()` may warn that its namespace was
+replaced by `.GlobalEnv`. The file also stores simulator functions that refer
+to that package. We use the recorded samples and pairs, not those functions,
+so the tidy analysis can proceed without it.
 
 ```{r load-data}
 loaded_data <- new.env(parent = emptyenv())
@@ -130,9 +131,9 @@ The main list contains:
 
 * `Samps`: sampled individuals and their measured attributes.
 * `POPs`: identified parent-offspring pairs, with parent in column 1 and offspring
-  in column 2. The entries are **row indices in the original `Samps` table**.
-* `MHSPs` and `PHSPs`: maternal and paternal half-sibling pairs. We do not use
-  these in the Acme analysis.
+  in column 2. The entries are **individual IDs matching `Samps$ID`**, not row numbers.
+* `FSPs`, `same2KPs`, and `diff2KPs`: additional sibling-pair tables. We do not
+  use these in this POP-only analysis.
 
 Two attributes carry additional information:
 
@@ -152,131 +153,152 @@ names(attr(raw_data, "secret"))  # Names only; simulation truth is not fitted da
 
 Amat <- public$Amat             # Knife-edge age at maturity, in years.
 Amat
-head(raw_data$Samps)
+as_tibble(unclass(raw_data$Samps)) |> slice_head(n = 6)
 head(raw_data$POPs)
 ```
 
-In `Samps`, `Me` is an individual's name, `Sex` is its sex, `Y` is its sampling
-year, and `A` is its age at sampling. Both year and age are known exactly in
-this example. The public `C_sya` object contains catch information indexed by
+In `Samps`, `ID` identifies an individual, `SEX` is its sex (`FEMALE` or
+`MALE`), `Y` is its sampling year, and `A` is its age at sampling. Both year
+and age are known exactly. `LENGTH` is recorded but unused in this model;
+`LETHAL` records whether sampling was lethal. All samples here are lethal. The public `C_sya` object contains catch information indexed by
 sex, year, and age. **We do not use catch totals to fit this Acme model**:
 the numbers of pairwise comparisons we use in the model are calculated from the
 numbers of sampled individuals. More elaborate fish
 models can use catches in their population dynamics.
 
-## Give the original row indices a permanent column
+## Use individual IDs as the join keys
 
-We add `idx` **before any filtering**. Subsetting the samples will then leave
-these identifiers intact, so the original pair entries remain meaningful.
-We never use row positions in a filtered table as individual identifiers.
+The 2026 dataset already supplies stable individual IDs. They remain unchanged
+when we subset the samples, so we join using IDs directly. Unlike the 2024
+version, the pair entries do not need to be interpreted as row positions.
+
+`Samps` has Mark's `litewt_df` class: underneath it is a list of equal-length
+columns. `unclass()` removes that wrapper, and `as_tibble()` makes an ordinary
+tibble without needing the package that defines the wrapper.
 
 ```{r permanent-indices}
-samples <- as_tibble(raw_data$Samps) |>
-  mutate(idx = row_number(), .before = 1)  # Preserve the original Samps row number.
+samples <- as_tibble(unclass(raw_data$Samps)) # Keep the existing individual IDs.
 
 pairs <- tibble(
   pair_idx = seq_len(nrow(raw_data$POPs)),  # Identify each observed pair record.
-  parent_idx = raw_data$POPs[, 1],         # Original parent row index.
-  offspring_idx = raw_data$POPs[, 2]       # Original offspring row index.
+  parent_id = raw_data$POPs[, 1],          # ID of the identified parent.
+  offspring_id = raw_data$POPs[, 2]        # ID of the identified offspring.
 )
 
-stopifnot(!anyDuplicated(samples$idx), !anyDuplicated(samples$Me),
-          all(pairs$parent_idx %in% samples$idx),
-          all(pairs$offspring_idx %in% samples$idx),
-          !anyDuplicated(pairs[c("parent_idx", "offspring_idx")]))
+stopifnot(!anyNA(samples$ID), !anyDuplicated(samples$ID),
+          all(pairs$parent_id %in% samples$ID),
+          all(pairs$offspring_id %in% samples$ID),
+          all(pairs$parent_id != pairs$offspring_id),
+          !anyDuplicated(pairs[c("parent_id", "offspring_id")]),
+          all(samples$LETHAL))
 
-# Join names to the first few pairs to see the indexing convention in action.
+# Inspect the original IDs alongside each pair member's sampling year and age.
 pairs |>
   slice_head(n = 6) |>
-  left_join(select(samples, parent_idx = idx, parent_name = Me), by = "parent_idx") |>
-  left_join(select(samples, offspring_idx = idx, offspring_name = Me), by = "offspring_idx") |>
+  left_join(select(samples, parent_id = ID, parent_year = Y, parent_age = A),
+            by = "parent_id", relationship = "many-to-one") |>
+  left_join(select(samples, offspring_id = ID, offspring_year = Y, offspring_age = A),
+            by = "offspring_id", relationship = "many-to-one") |>
   knitr::kable()
 ```
 
 # Prepare individuals and pairs for counting
 
-We reproduce Mark's analysis choices: keep female samples, call individuals
-sampled at age $A\ge A_{\mathrm{mat}}$ **potential parents**, and call those sampled
-at $A<A_{\mathrm{mat}}$ **potential offspring**. Every retained kin pair must have
-those corresponding parent and offspring roles. Both members are female, so
-these are specifically **mother-daughter pairs**, abbreviated MOPs below.
-
-These are roles **at sampling**. An adult at capture was not necessarily mature
-when a particular offspring was born. That question enters the probability
-model later. Likewise, we deliberately exclude observed mother-daughter pairs
-in which both animals were adults at sampling, even though those are genuine
-kin pairs: they are outside this analysis's comparison design.  (Remember, we are
-free to choose which comparisons we will retain for use in the model...as long as
-we don't cheat and base those decisions upon the number of kin pairs in different
-comparisons!)
+We reproduce Mark's 2026 analysis choices: retain female samples, use females
+sampled at age $A\ge A_{\mathrm{mat}}$ as **potential parents**, and use females
+born in or after `Bhat_min = 2000` as **potential offspring**. Both members are
+female, so retained pairs are specifically **mother-daughter pairs**, abbreviated
+MOPs below. The cutoff is an analysis choice, not a fitted parameter; it should
+be chosen without inspecting which comparisons contain kin matches.
 
 Birth year follows directly from the observed age:
 
 $$B=Y-A.$$
 
+**An offspring need not be a juvenile when sampled.** A female sampled as an
+adult can be a potential offspring in comparisons with older females and a
+potential parent in comparisons with younger females. We therefore record the
+two eligibility flags separately. Maturity at capture alone does not establish
+that a putative mother was alive and mature when a particular daughter was
+born; those conditions enter the probability model later.
+
 ```{r prepare-individuals}
+Bhat_min <- 2000  # Earliest admissible offspring birth year, matching Mark's script.
+
 female_samples <- samples |>
-  filter(Sex == "F") |>                             # Analyze female population dynamics.
+  filter(SEX == "FEMALE") |>                             # Analyze female population dynamics.
   mutate(B = Y - A,                                 # Recover each individual's birth year.
-         role = if_else(A >= Amat, "Adult", "Juvenile")) # Assign its role at sampling.
+         role = if_else(A >= Amat, "Adult", "Juvenile"), # Describe maturity at sampling.
+         parent_eligible = A >= Amat,                 # Potential mother at capture.
+         offspring_eligible = B >= Bhat_min)           # Potential daughter, at any capture age.
 
 female_samples |>
   count(Y, role, name = "n_sampled") |>
   pivot_wider(names_from = role, values_from = n_sampled, values_fill = 0) |>
-  knitr::kable(caption = "Female samples by sampling year and role")
+  knitr::kable(caption = "Female samples by sampling year and maturity status")
 ```
 
 Many individuals share a birth year and sampling year. The size of each point
 below represents the number in that group. Adult and juvenile status concerns
-the gap between the two years, not the birth year alone.
+the gap between the two years, not the birth year alone. The horizontal dotted
+line marks the offspring birth-year cutoff: points on or above it are eligible
+as offspring, including some purple adult points.
 
 ```{r cohort-figure}
 female_samples |>
   count(Y, B, role, name = "n") |>
   ggplot(aes(Y, B, size = n, color = role)) +
   geom_point(alpha = 0.75) +
+  geom_hline(yintercept = Bhat_min, linetype = "dotted", color = "grey35") +
   geom_abline(intercept = -Amat, slope = 1, linetype = "dashed", color = "grey45") +
   scale_size_area(max_size = 8) +
   scale_color_manual(values = c(Adult = "#6A51A3", Juvenile = "#D4A017")) +
   labs(x = "Sampling year (Y)", y = "Birth year (B = Y - A)",
-       size = "Sample count", color = "Role at sampling",
-       caption = "Dashed line: age at sampling equals the maturity age.")
+       size = "Sample count", color = "Maturity at sampling",
+       caption = "Dashed: maturity age at capture. Dotted: earliest eligible offspring birth year.")
 ```
 
-We now join the pair entries to the female sample records twice, using `idx`
-as a stable key. Inner joins retain pairs only when both individuals are in
-the female analysis sample. The role filter then selects adult-to-juvenile pairs.
+We now join the pair entries to the female sample records twice, using `ID`
+as the stable key. Inner joins retain pairs only when both individuals are in
+the female analysis sample. We then retain mature mothers and daughters born
+in or after the cutoff, including daughters sampled as adults.
 The `relationship` assertions ensure each pair endpoint matches just one animal.
 
 ```{r prepare-pairs}
 female_pairs <- pairs |>
   inner_join(                                      # Look up the putative mother's attributes.
     female_samples |>
-      select(parent_idx = idx, Yad = Y, Aad = A, Bad = B, parent_role = role),
-    by = "parent_idx", relationship = "many-to-one"
+      select(parent_id = ID, Yad = Y, Aad = A, Bad = B, parent_eligible),
+    by = "parent_id", relationship = "many-to-one"
   ) |>
   inner_join(                                      # Look up the daughter's attributes.
     female_samples |>
-      select(offspring_idx = idx, Bju = B, offspring_role = role),
-    by = "offspring_idx", relationship = "many-to-one"
+      select(offspring_id = ID, Bju = B, offspring_eligible, offspring_role = role),
+    by = "offspring_id", relationship = "many-to-one"
   )
 
 analysis_pairs <- female_pairs |>
-  filter(parent_role == "Adult", offspring_role == "Juvenile") # Match the comparison design.
+  filter(parent_eligible, offspring_eligible) # Match the comparison design.
 
-tibble(stage = c("All recorded POPs", "Both individuals female", "Adult-to-juvenile MOPs"),
+tibble(stage = c("All recorded POPs", "Both individuals female", "MOPs within the analysis design"),
        n_pairs = c(nrow(pairs), nrow(female_pairs), nrow(analysis_pairs))) |>
   knitr::kable()
 
 analysis_pairs |>
-  select(pair_idx, parent_idx, offspring_idx, Bju, Yad, Aad, Bad) |>
+  select(pair_idx, parent_id, offspring_id, Bju, Yad, Aad, Bad) |>
   slice_head(n = 8) |>
   knitr::kable()
 ```
 
 The pair counts above describe identified kin, not all comparisons. Each mother
 may contribute multiple pair records if several of her daughters were sampled.
-We will count every such pair once.
+We will count every such pair once, including adult daughters.
+
+```{r retained-pair-ages}
+analysis_pairs |>
+  count(offspring_role, name = "n_MOP") |>
+  knitr::kable(caption = "Retained MOPs by the daughter's maturity at sampling")
+```
 
 # Build the table of comparison categories
 
@@ -290,33 +312,35 @@ easier to read.
 ## Define the indices and their ranges
 
 Write $b$ for offspring birth year, $y$ for adult sampling year, and $a$ for adult
-age at sampling. The symbols `Bju`, `Yad`, and `Aad` in the code retain Mark's names.
+age at sampling. The symbols `Bju`, `Yad`, and `Aad` retain Mark's names;
+the historical `ju` suffix now denotes an eligible offspring, not necessarily
+a juvenile at capture.
 Each row of the eventual likelihood table represents one $(b,y,a)$ category.
 
-We construct complete integer ranges from the observed female juvenile birth
+We construct complete integer ranges from the eligible female offspring birth
 years and adult sampling years and ages, just as Mark's code does. If an
 intermediate year or age has no samples, its sample count is explicitly zero.
-We do **not** generate every individual adult-juvenile comparison.
+We do **not** generate every individual parent-offspring comparison.
 
 ```{r index-ranges}
-adults <- female_samples |> filter(role == "Adult")
-juveniles <- female_samples |> filter(role == "Juvenile")
-stopifnot(nrow(adults) > 0, nrow(juveniles) > 0)
+adults <- female_samples |> filter(parent_eligible)
+offspring <- female_samples |> filter(offspring_eligible)
+stopifnot(nrow(adults) > 0, nrow(offspring) > 0)
 
-Bju_range <- seq.int(min(juveniles$B), max(juveniles$B))
+Bju_range <- seq.int(min(offspring$B), max(offspring$B))
 Yad_range <- seq.int(min(adults$Y), max(adults$Y))
 Aad_range <- seq.int(min(adults$A), max(adults$A))
 
 y0 <- min(Bju_range)                     # Reference year for the abundance parameter.
 years <- seq.int(y0, max(Yad_range))      # Years over which we calculate abundance.
 
-tibble(index = c("b: juvenile birth year", "y: adult sampling year", "a: adult sampling age"),
+tibble(index = c("b: offspring birth year", "y: adult sampling year", "a: adult sampling age"),
        first = c(min(Bju_range), min(Yad_range), min(Aad_range)),
        last = c(max(Bju_range), max(Yad_range), max(Aad_range))) |>
   knitr::kable()
 ```
 
-Here $y_0$ is the earliest sampled juvenile birth year, reproducing Mark's choice.
+Here $y_0$ is the earliest eligible offspring birth year, reproducing Mark's choice.
 It specifies which year's abundance the first parameter describes; it does not
 mean the population began in that year. A different fixed reference year would
 reparameterize the same exponential trajectory. The `years` vector covers every
@@ -324,22 +348,22 @@ birth-year lookup and extends through the last adult sampling year for plotting.
 
 ## Count samples before counting comparisons
 
-Let $m_b^{\mathrm{ju}}$ be the number of sampled female juveniles born in year $b$,
+Let $m_b^{\mathrm{ju}}$ be the number of sampled female offspring born in year $b$,
 and let $m_{ya}^{\mathrm{ad}}$ be the number of sampled female adults captured in
-year $y$ at age $a$. We can pool juvenile sampling years because, under this
-example's assumptions, a juvenile's kin probability depends on her birth year,
+year $y$ at age $a$. We can pool offspring sampling years because, under this
+example's assumptions, an offspring's kin probability depends on her birth year,
 not the later year in which she was sampled.
 
 ```{r count-samples}
-juvenile_counts <- juveniles |>
-  count(Bju = B, name = "m_ju") |>                   # Pool female juveniles by birth year.
+offspring_counts <- offspring |>
+  count(Bju = B, name = "m_ju") |>                   # Pool female offspring by birth year.
   complete(Bju = Bju_range, fill = list(m_ju = 0L))  # Include unsampled cohorts in the range.
 
 adult_counts <- adults |>
   count(Yad = Y, Aad = A, name = "m_ad") |>          # Keep adult sampling year and age together.
   complete(Yad = Yad_range, Aad = Aad_range, fill = list(m_ad = 0L))
 
-juvenile_counts |> knitr::kable()
+offspring_counts |> knitr::kable()
 adult_counts |> slice_head(n = 10) |> knitr::kable()
 ```
 
@@ -354,21 +378,25 @@ $$
 
 This rule does not yet require that the adult was *mature* at the birth. We keep
 that stronger biological condition visible in the probability calculation.
-The adult and juvenile sample sets are disjoint here, so we do not use
-$\binom{m}{2}$ or divide by two: these are directed cross-group comparisons.
+The two sample sets overlap: an adult born after the cutoff can occur in both.
+The strict birth-order condition $b>y-a$ excludes self-comparisons and
+same-cohort comparisons. For two eligible adults of different birth years,
+only the direction from the older individual to the younger survives. Thus
+we neither divide the product by two nor use $\binom{m}{2}$. Each retained
+comparison has a specific putative-parent and putative-offspring direction.
 
 ```{r count-comparisons}
 comparison_grid <- expand_grid(                  # Enumerate categories, not individual pairs.
   Bju = Bju_range, Yad = Yad_range, Aad = Aad_range
 ) |>
-  left_join(juvenile_counts, by = "Bju", relationship = "many-to-one") |>
+  left_join(offspring_counts, by = "Bju", relationship = "many-to-one") |>
   left_join(adult_counts, by = c("Yad", "Aad"), relationship = "many-to-one") |>
   mutate(Bad = Yad - Aad,                        # Birth year of adults in this category.
          birth_order_ok = Bju > Bad,             # Retain only the intended temporal order.
          n_comp_MOP = as.double(m_ju) * m_ad * birth_order_ok) # Use doubles for large products.
 
 stopifnot(!anyNA(comparison_grid),
-          sum(comparison_grid$n_comp_MOP) <= as.double(nrow(adults)) * nrow(juveniles))
+          sum(comparison_grid$n_comp_MOP) <= as.double(nrow(adults)) * nrow(offspring))
 
 comparison_grid |>
   summarise(n_categories = n(),
@@ -424,7 +452,7 @@ categories |>
   scale_fill_gradient(low = "#edf5f3", high = "#237e83") +
   scale_x_continuous(breaks = Yad_range) +
   scale_y_continuous(breaks = Bju_range) +
-  labs(x = "Adult sampling year", y = "Juvenile birth year", fill = "Comparisons\n(millions)",
+  labs(x = "Adult sampling year", y = "Offspring birth year", fill = "Comparisons\n(millions)",
        caption = "Fill: comparison exposure summed over adult ages. Numbers: observed MOPs.")
 ```
 
@@ -593,10 +621,10 @@ one-dimensional abundance vector, accomplishing the same year lookup that
 Mark's `N_Y[Bju]` offarray indexing provides.
 
 ```{r likelihood-function}
-#' Log likelihood for the female-only Acme adult-to-juvenile comparison design
+#' Log likelihood for the female-only Acme parent-offspring comparison design
 #' @param par Numeric vector: log adult female abundance at y0, then exponential growth rate.
 #' @param categories Prepared comparison table, including the fixed alive/mature flags.
-#' @param years Integer years supporting every juvenile-birth-year lookup.
+#' @param years Integer years supporting every offspring-birth-year lookup.
 #' @param y0 Fixed reference year defining the first parameter.
 #' @return Scalar Poisson log likelihood; invalid numerical trajectories return -Inf.
 acme_loglik <- function(par, categories, years, y0) {
@@ -840,7 +868,10 @@ This section is an independent check, not a prerequisite for the tidy analysis.
 If Mark's packages are available, we source **only his function definitions**,
 not the interactive driver script. We compare categories by explicit keys,
 then compare likelihood values at the starting values, fitted values, and
-several other parameter vectors. We also fit the original likelihood from
+several other parameter vectors. We pass the same offspring birth-year cutoff
+to Mark's preparation function. This optional check also needs `kinsimmer2`,
+which supplies his revised ID-based sample-subsetting interface. The tidy
+analysis itself does not require it. We also fit his likelihood from
 the same starting values.
 
 This is the one section where we deliberately use Mark's environment interface.
@@ -851,7 +882,7 @@ leaves all the earlier analysis usable.
 ```{r compare-with-mark, message=FALSE}
 mark_repo <- dirname(dirname(data_path))
 mark_functions <- file.path(mark_repo, "r-scripts", "ckmr_funs.r")
-mark_packages <- c("mvbutils", "offarray", "atease")
+mark_packages <- c("mvbutils", "offarray", "atease", "kinsimmer2")
 can_check <- isTRUE(params$check_mark_code) && file.exists(mark_functions) &&
   all(vapply(mark_packages, requireNamespace, logical(1), quietly = TRUE))
 
@@ -859,12 +890,13 @@ if (can_check) {
   library(mvbutils)
   library(offarray)
   library(atease)
+  library(kinsimmer2) # Revised ID-based subset_samples() and litewt_df support.
   mark_code <- new.env(parent = globalenv())
   sys.source(mark_functions, envir = mark_code)
 
   mark_loglik <- mark_code$generic_lglk_MOP_ideal_mammal
   mark_env <- mark_code$boring_data_prep_delfi_A(
-    raw_data, prev_env = environment(mark_loglik)
+    raw_data, Bhat_min = Bhat_min, prev_env = environment(mark_loglik)
   )
   environment(mark_loglik) <- mark_env
 

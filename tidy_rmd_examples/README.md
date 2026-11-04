@@ -1,7 +1,9 @@
 # Tidy CKMR notebooks
 
 Start with [fit_delfi_A.Rmd](fit_delfi_A.Rmd), a static R Markdown companion to
-Mark's Acme Archipelago example. Preparation is shown inline, with
+Mark's Acme Archipelago example from the 2026 Hawaii course. Potential
+offspring are selected by birth year (2000 onward by default), including
+individuals sampled as adults. Pair entries are individual IDs. Preparation is shown inline, with
 inspectable tables, figures, and mathematics. Preparation stays inline;
 likelihood functions are introduced when repeated evaluation becomes useful.
 
@@ -10,7 +12,7 @@ packages are `dplyr` (1.1.0 or newer), `tidyr`, `ggplot2`, `tibble`, `rmarkdown`
 and `knitr`. Rendering HTML also requires Pandoc, included with RStudio.
 
 Change `data_path` in the first data-loading chunk, or edit the `data_path` YAML
-parameter. The current default is `../.can24/datasets/samp_delfi_A.rda`, relative
+parameter. The current default is `../.hawaii-ckmr-26/datasets/samp_delfi_A.rda`, relative
 to the Rmd's folder. Absolute paths work too. The simulated data are not
 copied into this folder; participants need their own authorized copy of Mark's
 course repository.
@@ -31,7 +33,7 @@ To override the data location explicitly:
 ```r
 rmarkdown::render(
   "tidy_rmd_examples/fit_delfi_A.Rmd",
-  params = list(data_path = "/absolute/path/to/can2024/datasets/samp_delfi_A.rda",
+  params = list(data_path = "/absolute/path/to/hawaii-ckmr-26/datasets/samp_delfi_A.rda",
                 check_mark_code = FALSE),
   output_dir = "tidy_rmd_examples/output"
 )
@@ -39,7 +41,7 @@ rmarkdown::render(
 
 The original-code cross-check compares preparation and likelihood values with
 Mark's original functions, and checks the fitted parameter estimates. It uses
-`mvbutils`, `offarray`, and `atease` only when available and when
+`mvbutils`, `offarray`, `atease`, and `kinsimmer2` only when available and when
 `check_mark_code` is true. It sources `r-scripts/ckmr_funs.r` from the repository
 containing the chosen dataset; it does not run Mark's interactive driver script.
 
