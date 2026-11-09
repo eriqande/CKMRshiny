@@ -32,6 +32,20 @@ params:
   overflow-wrap: normal !important;
   word-wrap: normal !important;
 }
+details.optional-checks {
+  margin: 1.5em 0;
+  padding: 0.85em 1em;
+  border: 1px solid #c7d9dc;
+  border-left: 4px solid #237e83;
+  border-radius: 5px;
+  background: #f5f9f9;
+}
+details.optional-checks > summary {
+  cursor: pointer;
+  font-weight: bold;
+  color: #233a3d;
+}
+details.optional-checks[open] > summary { margin-bottom: 1em; }
 </style>
 
 ```{r setup, include=FALSE}
@@ -55,11 +69,12 @@ if (!exists("params", inherits = FALSE)) {
 # What we will do
 
 This notebook follows the Acme Archipelago example in Mark Bravington's
-`fit_delfi_A.r`, using the revised dataset and analysis in his 2026 Hawaii
-course repository. We use the same female-only comparison design and Poisson
+`fit_delfi_A.r`, using the dataset and analysis in his Hawaii
+course repository. We use his female-only comparison design and Poisson
 pseudo-likelihood: potential parents are mature at sampling, and potential
-offspring are born in or after a chosen year, even if sampled as adults. The change is how we expose the calculations: individual records,
-comparison categories, and predictions are ordinary data frames.
+offspring are born in or after a chosen year, even if sampled as adults.
+We expose the calculations through ordinary data frames of individual records,
+comparison categories, and predictions.
 
 We leave the preparation steps expanded so you can run each chunk and inspect
 its output. Sections 2 to 4 are casual stroll through the "boring data prep" part
@@ -168,13 +183,13 @@ models can use catches in their population dynamics.
 
 ## Use individual IDs as the join keys
 
-The 2026 dataset already supplies stable individual IDs. They remain unchanged
-when we subset the samples, so we join using IDs directly. Unlike the 2024
-version, the pair entries do not need to be interpreted as row positions.
+The dataset supplies stable individual IDs. They remain unchanged when we
+subset the samples, so we join using IDs directly. Pair entries identify
+individuals by these IDs, not by their row positions.
 
 `Samps` has Mark's `litewt_df` class: underneath it is a list of equal-length
 columns. `unclass()` removes that wrapper, and `as_tibble()` makes an ordinary
-tibble without needing the package that defines the wrapper.
+tibble without needing the package that defines the `litewt_df` wrapper.
 
 ```{r permanent-indices}
 samples <- as_tibble(unclass(raw_data$Samps)) # Keep the existing individual IDs.
@@ -204,7 +219,7 @@ pairs |>
 
 # Prepare individuals and pairs for counting
 
-We reproduce Mark's 2026 analysis choices: retain female samples, use females
+We reproduce Mark's analysis choices: retain female samples, use females
 sampled at age $A\ge A_{\mathrm{mat}}$ as **potential parents**, and use females
 born in or after `Bhat_min = 2000` as **potential offspring**. Both members are
 female, so retained pairs are specifically **mother-daughter pairs**, abbreviated
@@ -313,7 +328,7 @@ easier to read.
 
 Write $b$ for offspring birth year, $y$ for adult sampling year, and $a$ for adult
 age at sampling. The symbols `Bju`, `Yad`, and `Aad` retain Mark's names;
-the historical `ju` suffix now denotes an eligible offspring, not necessarily
+the `ju` suffix denotes an eligible offspring, not necessarily
 a juvenile at capture.
 Each row of the eventual likelihood table represents one $(b,y,a)$ category.
 
@@ -446,13 +461,14 @@ design easier to see. The likelihood retains those ages as separate categories.
 categories |>
   group_by(Bju, Yad) |>
   summarise(comparisons = sum(n_comp_MOP), matches = sum(n_MOP), .groups = "drop") |>
-  ggplot(aes(Yad, Bju, fill = comparisons / 1e6)) +
+  ggplot(aes(Yad, Bju, fill = comparisons / 1e3)) +
   geom_tile(color = "white") +
   geom_text(aes(label = matches), size = 3.4) +
   scale_fill_gradient(low = "#edf5f3", high = "#237e83") +
   scale_x_continuous(breaks = Yad_range) +
   scale_y_continuous(breaks = Bju_range) +
-  labs(x = "Adult sampling year", y = "Offspring birth year", fill = "Comparisons\n(millions)",
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  labs(x = "Adult sampling year", y = "Offspring birth year", fill = "Comparisons\n(thousands)",
        caption = "Fill: comparison exposure summed over adult ages. Numbers: observed MOPs.")
 ```
 
@@ -604,8 +620,8 @@ with zero expected count has log probability $-\infty$. We do not silently
 remove invalid probabilities with `na.rm = TRUE`.
 
 Comparisons sharing animals are not literally independent in every sampling
-regime. This is the same Poisson approximation used in the original fit, not
-a new claim that table aggregation makes the comparisons independent.
+regime. We use the Poisson approximation in Mark's fit; table aggregation
+does not make the comparisons independent.
 
 ```{r sum-at-start}
 loglik_at_start <- sum(worked_rows$loglik_piece)
@@ -699,6 +715,7 @@ fitted_rows |>
   geom_line() + geom_point(size = 2.5) +
   scale_x_continuous(breaks = Bju_range) +
   scale_color_manual(values = c(Observed = "#233a3d", Expected = "#237e83")) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
   labs(x = "Offspring birth year", y = "Mother-daughter pairs", color = NULL, shape = NULL,
        caption = "Counts summed over adult sampling years and ages; no refitting by cohort.")
 ```
@@ -870,7 +887,7 @@ not the interactive driver script. We compare categories by explicit keys,
 then compare likelihood values at the starting values, fitted values, and
 several other parameter vectors. We pass the same offspring birth-year cutoff
 to Mark's preparation function. This optional check also needs `kinsimmer2`,
-which supplies his revised ID-based sample-subsetting interface. The tidy
+which supplies his ID-based sample-subsetting interface. The tidy
 analysis itself does not require it. We also fit his likelihood from
 the same starting values.
 
@@ -890,7 +907,7 @@ if (can_check) {
   library(mvbutils)
   library(offarray)
   library(atease)
-  library(kinsimmer2) # Revised ID-based subset_samples() and litewt_df support.
+  library(kinsimmer2) # ID-based subset_samples() and litewt_df support.
   mark_code <- new.env(parent = globalenv())
   sys.source(mark_functions, envir = mark_code)
 
@@ -1137,7 +1154,29 @@ the AD object.** Editing the original data frame after constructing `ad` does
 **not** update the recorded objective. Tape construction is a one-time cost for a
 given prepared model, not a step to repeat inside the optimizer.
 
-Before fitting, we compare values away from the optimum too. Agreement at only
+## Fit with the same optimizer, now supplying the gradient
+
+The optimizer remains `nlminb()`. It now receives an efficient objective and
+its AD gradient, rather than requesting numerical objective perturbations to
+approximate that gradient. We use the original starting values, not the earlier
+optimum, so this is a separate fit.
+
+```{r rtmb-fit, eval=run_rtmb}
+fit_rtmb <- nlminb(start = ad$par, objective = ad$fn, gradient = ad$gr)
+
+
+tibble(parameter = names(theta_start), estimate = fit_rtmb$par) |>
+  knitr::kable(digits = 9)
+```
+
+<details class="optional-checks">
+<summary>Optional checks: do the ordinary R and RTMB implementations agree?</summary>
+
+These checks still run when the document is knitted, even with this box closed.
+They verify the implementation without adding steps to the fitting workflow.
+
+We compare values away from the optimum too, using the starting values and
+several other parameter vectors. Agreement at only
 one point would not establish that two functions describe the same surface.
 
 ```{r rtmb-check-values, eval=run_rtmb}
@@ -1181,17 +1220,11 @@ tibble(parameter = names(theta_start), finite_difference = finite_difference,
   knitr::kable(digits = 7)
 ```
 
-## Fit with the same optimizer, now supplying the gradient
+Finally, compare the fitted parameters and objective values, and check that
+the AD gradient is close to zero at the fitted values:
 
-The optimizer remains `nlminb()`. It now receives an efficient objective and
-its AD gradient, rather than requesting numerical objective perturbations to
-approximate that gradient. We use the original starting values, not the earlier
-optimum, so this is a separate fit.
-
-```{r rtmb-fit, eval=run_rtmb}
-fit_rtmb <- nlminb(start = ad$par, objective = ad$fn, gradient = ad$gr)
-
-# just catch if something went awry
+```{r rtmb-check-fit, eval=run_rtmb}
+# Check convergence, agreement of the two fits, and the gradient at the optimum.
 stopifnot(fit_rtmb$convergence == 0,
           max(abs(fit_rtmb$par - fit$par)) < 1e-4,
           abs(fit_rtmb$objective - fit$objective) < 1e-6,
@@ -1201,6 +1234,8 @@ tibble(parameter = names(theta_start), ordinary_R = fit$par,
        RTMB = fit_rtmb$par, difference = fit_rtmb$par - fit$par) |>
   knitr::kable(digits = 9)
 ```
+
+</details>
 
 ## Reuse the manual delta method with the AD Hessian
 
@@ -1267,7 +1302,45 @@ reported <- summary(ad_sdr, "report")
 reported_log_N <- reported[rownames(reported) == "log_N_ad", , drop = FALSE]
 reported_N <- reported[rownames(reported) == "N_ad", , drop = FALSE]
 stopifnot(nrow(reported_log_N) == length(years), nrow(reported_N) == length(years))
+```
 
+We explicitly supply the AD Hessian as `hessian.fixed`, so `sdreport()` uses
+the same parameter information matrix as our manual calculation. Without that
+argument, the installed TMB implementation can construct its Hessian by
+numerically differentiating the AD gradient. That is usually close, but using
+the same Hessian makes this an unambiguous check of the propagation step.
+
+To reproduce the earlier positive confidence limits, use the **log-scale**
+reports and then exponentiate:
+
+```{r rtmb-reported-intervals, eval=run_rtmb}
+reported_intervals <- tibble(
+  year = years,
+  N_female = exp(reported_log_N[, "Estimate"]),
+  lower = exp(reported_log_N[, "Estimate"] - 1.96 * reported_log_N[, "Std. Error"]),
+  upper = exp(reported_log_N[, "Estimate"] + 1.96 * reported_log_N[, "Std. Error"])
+)
+knitr::kable(reported_intervals, digits = 4)
+```
+
+Using $\widehat N\pm1.96\operatorname{SE}(\widehat N)$ instead would produce
+normal intervals on the abundance scale, not these exponentiated log-scale
+intervals. Both use first-order uncertainty propagation, but their interval
+endpoints are not identical. `sdreport()` supplies standard errors; the scale
+and interpretation of our confidence limits remain modeling choices.
+
+<details class="optional-checks">
+<summary>Optional checks: do manual and automatic uncertainty calculations agree?</summary>
+
+The calculations below compare the standard errors and confidence limits from
+the two approaches. They still run when this box is closed.
+
+The standard errors of log abundance should agree with the manual calculation
+to numerical precision. For abundance itself the first-order delta method gives
+$\operatorname{SE}(\widehat N_t)\approx\widehat N_t\operatorname{SE}(\log\widehat N_t)$;
+the last check verifies that relationship too.
+
+```{r rtmb-check-uncertainty, eval=run_rtmb}
 report_comparison <- tibble(
   year = years,
   log_N = reported_log_N[, "Estimate"],
@@ -1283,35 +1356,23 @@ stopifnot(max(abs(report_comparison$log_N - log_N_rtmb)) < 1e-7,
 knitr::kable(report_comparison, digits = 7)
 ```
 
-We explicitly supply the AD Hessian as `hessian.fixed`, so `sdreport()` uses
-the same parameter information matrix as our manual calculation. Without that
-argument, the installed TMB implementation can construct its Hessian by
-numerically differentiating the AD gradient. That is usually close, but using
-the same Hessian makes this an unambiguous check of the propagation step.
+Finally, compare the exponentiated log-scale confidence limits. Both methods
+use the same fitted parameters and AD Hessian, so the limits should agree to
+numerical precision:
 
-The standard errors of log abundance should agree with the manual calculation
-to numerical precision. For abundance itself the first-order delta method gives
-$\operatorname{SE}(\widehat N_t)\approx\widehat N_t\operatorname{SE}(\log\widehat N_t)$;
-the last check verifies that relationship too.
-
-To reproduce the earlier positive confidence limits, use the **log-scale**
-reports and then exponentiate:
-
-```{r rtmb-reported-intervals, eval=run_rtmb}
-reported_intervals <- report_comparison |>
-  transmute(year, N_female,
-            lower = exp(log_N - 1.96 * sdreport_se_log_N),
-            upper = exp(log_N + 1.96 * sdreport_se_log_N))
+```{r rtmb-check-intervals, eval=run_rtmb}
 stopifnot(max(abs(reported_intervals$lower - rtmb_intervals$lower)) < 1e-4,
           max(abs(reported_intervals$upper - rtmb_intervals$upper)) < 1e-4)
-knitr::kable(reported_intervals, digits = 4)
+tibble(
+  limit = c("Lower", "Upper"),
+  max_absolute_difference = c(
+    max(abs(reported_intervals$lower - rtmb_intervals$lower)),
+    max(abs(reported_intervals$upper - rtmb_intervals$upper))
+  )
+) |> knitr::kable(digits = 10)
 ```
 
-Using $\widehat N\pm1.96\operatorname{SE}(\widehat N)$ instead would produce
-normal intervals on the abundance scale, not these exponentiated log-scale
-intervals. Both use first-order uncertainty propagation, but their interval
-endpoints are not identical. `sdreport()` supplies standard errors; the scale
-and interpretation of our confidence limits remain modeling choices.
+</details>
 
 We have now connected the same category table to an ordinary R fit, a recorded
 RTMB fit, a manually propagated covariance calculation, and an automatically
