@@ -199,6 +199,62 @@ pop_app_ui <- function() {
               shiny::p("This scenario's register preserves the settings for each trial. Scroll across for seeds and summaries; select a trial above to explore its replicates."),
               shiny::div(class = "trial-scroll", shiny::tableOutput(ns("trial_register"))),
               shiny::textOutput(ns("storage_details"))
+            ),
+            if (!unequal && !size_based) shiny::div(class = "section",
+              shiny::h3("Questions to Ask / Things to Try"),
+              shiny::tags$ol(
+                shiny::tags$li(
+                  shiny::p(shiny::strong("Scale up the population while keeping the expected number of POPs the same. "),
+                    "Make the population 10 to 100 times larger, then adjust the sample sizes to keep the expected numbers of mother-offspring and father-offspring pairs approximately unchanged. Remember: expected pairs = pairwise comparisons / adult abundance. For mothers, this is Sf \u00d7 Sk / Nf; for fathers, Sm \u00d7 Sk / Nm. How do the pair-count distributions and precision of the abundance estimates compare between trials?")
+                ),
+                shiny::tags$li(
+                  shiny::p(shiny::strong("Explore the 50-POP rule of thumb. "),
+                    "Bravington, Skaug and Anderson (2016) suggested aiming for about 50 POPs to obtain a coefficient of variation (CV) of roughly 15%. Choose sample sizes that yield about 50 expected POPs for each sex, run many replicates, and inspect the estimator CVs in section 04. Do the results support this rule of thumb? What happens with fewer or more expected pairs? ",
+                    shiny::tags$a("Read the paper", href = "https://doi.org/10.1214/16-STS552", target = "_blank", rel = "noopener noreferrer"), ".")
+                ),
+                shiny::tags$li(
+                  shiny::p(shiny::strong("Explore sparse sampling and parents with multiple matches. "),
+                    "Sparse sampling means that the sample is small relative to the population. In this equal-reproduction scenario, a particular parent is unlikely to have two or more offspring in the sample when sampling is sparse. With the number of sampled offspring held fixed, that probability is of order ",
+                    shiny::tags$span("O(N", shiny::tags$sup("-2"), ")"),
+                    ", where N is the number of adults of the relevant sex. Increase population sizes while holding sample sizes fixed, and use the section 02 histograms to see how many sampled mothers and fathers have at least two sampled offspring. Inspect several replicates. How does this compare with increasing sample sizes to maintain the expected pair count, as in question 1?")
+                )
+              )
+            ) else if (unequal && !size_based) shiny::div(class = "section",
+              shiny::h3("Questions to Ask / Things to Try"),
+              shiny::tags$ol(
+                shiny::tags$li(
+                  shiny::p(shiny::strong("Change reproductive variability in one sex at a time. "),
+                    "Keep random reproductive sampling weights enabled. Change the gamma shape parameter for one sex while holding the other sex's shape parameter and all population and sample sizes fixed. Which direction produces more variation in offspring number among parents? Compare the two sexes in section 01.")
+                ),
+                shiny::tags$li(
+                  shiny::p(shiny::strong("Explore large gamma shape parameters. "),
+                    "As shape increases, the raw mean reproductive sampling weight increases, but relative variation among individuals decreases. Only relative sampling weights determine parenthood here; the total number of offspring remains fixed at Nk. With a large shape parameter, how do the results compare with the equal-reproduction tab? You can also uncheck the random-weights option to make the comparison within this tab.")
+                ),
+                shiny::tags$li(
+                  shiny::p(shiny::strong("For the population geneticists: does unequal reproduction disrupt abundance estimation? "),
+                    "Does unequal reproduction introduce a systematic shift in abundance estimates compared with equal reproduction? If not, why not? Think about how adults are sampled and how the expected number of POPs depends on their abundance. Does unequal reproduction change the variance of the estimates? Use many replicates to distinguish systematic patterns from chance.")
+                ),
+                shiny::tags$li(
+                  shiny::p(shiny::strong("Check confidence-interval coverage. "),
+                    "How often do the simple model's confidence intervals contain the true abundance? Compare finite 95% CI inclusion in section 04 with the nominal 95% level as you vary the shape parameters. Remember that this summary includes only replicates with finite estimates; also check how many replicates have zero POPs and therefore no finite estimate or Wald interval.")
+                ),
+                shiny::tags$li(
+                  shiny::p(shiny::strong("Compare small and large populations at the same expected pair count. "),
+                    "Start with about 1,000 adults of each sex and sample sizes giving 50 expected POPs for each sex. For example, use Nf = Nm = 1,000, Nk = 2,000, Sf = Sm = 100, and Sk = 500. Then multiply all three population sizes by 100 and all three sample sizes by 10, keeping the gamma shape parameters unchanged. The expected pair counts stay the same. In which population do the estimators perform better? Compare bias, CV, confidence-interval coverage, and the frequency of parents with multiple sampled offspring.")
+                )
+              )
+            ) else if (size_based) shiny::div(class = "section",
+              shiny::h3("Questions to Ask / Things to Try"),
+              shiny::tags$ol(
+                shiny::tags$li(
+                  shiny::p(shiny::strong("Reduce the effective number of females relative to census abundance. "),
+                    "Adjust the female growth and fecundity parameters until the female Effective N / census N ratio in section 01 is about 0.3. Keep the male parameters fixed for comparison. Hint: reproductive output is particularly sensitive to the exponent in the fecundity-length relationship. Check several replicates to see how much the realized ratio varies.")
+                ),
+                shiny::tags$li(
+                  shiny::p(shiny::strong("Look closely at the lengths of parents in identified POPs. "),
+                    "In section 03, switch the comparison to length and compare the population, sampled adults, and parents represented in identified pairs. Which lengths are overrepresented among pair parents? Given that pattern, can you think of a way to break the POP abundance estimator? Which assumptions about how adults are sampled would you try changing?")
+                )
+              )
             )
           )
         )
