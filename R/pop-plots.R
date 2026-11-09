@@ -391,7 +391,12 @@ pop_pair_trait_data <- function(replicate, variable = c("reproductive_weight", "
                    `Expected pair parents` = NULL)
     do.call(rbind, lapply(names(values), function(source) {
       counts <- if (source == "Population adults") bins$count else
-        if (source == "Expected pair parents") bins$erro_sum else
+        if (source == "Expected pair parents") {
+          if (is.null(replicate$selected_size_summary)) bins$erro_sum else {
+            selected <- replicate$selected_size_summary
+            selected$erro_sum[selected$sex == s & selected$variable == variable]
+          }
+        } else
           tabulate(findInterval(values[[source]], c(bins$lower, tail(bins$upper, 1)),
                                 all.inside = TRUE), nbins = nrow(bins))
       data.frame(sex = s, source = source, lower = bins$lower, upper = bins$upper,
@@ -485,4 +490,82 @@ print.pop_pair_traits <- function(x, ...) {
                   just = c("left", "top"), gp = grid::gpar(fontsize = 9))
   grid::popViewport(2)
   invisible(x)
+}
+
+#' Preview length-window eligibility with population context and saved samples
+#'
+#' Uses the saved random display subset (at most 500 adults per sex) as context,
+#' rather than regenerating a whole population while sliders move. Ineligible
+#' regions, reference curves, and adults are gray. Eligible adults are faintly
+#' colored; when the preview matches the saved selection, actual sampled adults
+#' are overlaid more strongly. Large sample overlays use count-scaled grid bins.
+#' @param replicate Saved size-based replicate.
+#' @param windows Female and Male length-window bounds.
+#' @param kind Growth (age-length) or output (length-ERRO).
+#' @param show_samples Whether windows match the saved sampling settings.
+#' @return Sex-faceted ggplot with the same axes as the population views.
+#' @export
+pop_plot_selectivity <- function(replicate, windows, kind = c("growth", "output"),
+                                 show_samples = FALSE) {
+  kind <- match.arg(kind)
+  windows <- pop_length_windows(windows)
+  adults <- replicate$display_adults
+  plot <- pop_plot_size_relationship(adults, replicate$settings$size_model,
+                                     kind, replicate$size_summary, curves_only = TRUE)
+  curves <- plot$layers[[1]]$data
+  in_window <- function(sex, length) {
+    lo <- vapply(sex, function(s) windows[[s]][1], numeric(1))
+    hi <- vapply(sex, function(s) windows[[s]][2], numeric(1))
+    length >= lo & length <= hi
+  }
+  length <- if (kind == "growth") curves$y else curves$x
+  curves$eligible <- in_window(curves$sex, length)
+  curves$segment <- paste(curves$sex, ifelse(length < vapply(curves$sex,
+    function(s) windows[[s]][1], numeric(1)), "below", "above"))
+  # Very narrow windows can leave a single grid point in a curve segment.
+  # Such a segment has no line to draw and otherwise produces ggplot messages.
+  inactive <- curves[!curves$eligible, ]
+  active <- curves[curves$eligible, ]
+  counts <- table(inactive$segment)
+  inactive <- inactive[inactive$segment %in% names(counts)[counts >= 2], ]
+  counts <- table(active$sex)
+  active <- active[active$sex %in% names(counts)[counts >= 2], ]
+  points <- data.frame(sex = adults$sex, x = if (kind == "growth") adults$age else adults$length,
+    y = if (kind == "growth") adults$length else adults$reproductive_weight,
+    eligible = in_window(adults$sex, adults$length))
+  regions <- do.call(rbind, lapply(names(windows), function(s) {
+    w <- windows[[s]]
+    if (kind == "growth") data.frame(sex = s, xmin = -Inf, xmax = Inf,
+      ymin = c(-Inf, w[2]), ymax = c(w[1], Inf)) else
+      data.frame(sex = s, xmin = c(-Inf, w[2]), xmax = c(w[1], Inf), ymin = -Inf, ymax = Inf)
+  }))
+  plot$layers <- list()
+  plot <- plot +
+    ggplot2::geom_rect(data = regions, ggplot2::aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+      fill = "grey85", alpha = .35) +
+    ggplot2::geom_line(data = inactive,
+      ggplot2::aes(x, y, group = segment), color = "grey65", linewidth = .8) +
+    ggplot2::geom_line(data = active, ggplot2::aes(x, y, color = sex), linewidth = .8) +
+    ggplot2::geom_point(data = points[!points$eligible, ], ggplot2::aes(x, y), color = "grey65", size = .9, alpha = .35) +
+    ggplot2::geom_point(data = points[points$eligible, ], ggplot2::aes(x, y, color = sex), size = 1, alpha = .25)
+  if (show_samples) {
+    a <- rbind(replicate$samples$females, replicate$samples$males)
+    d <- data.frame(sex = a$sex, x = if (kind == "growth") a$age else a$length,
+      y = if (kind == "growth") a$length else a$reproductive_weight)
+    if (nrow(d) > 10000) {
+      xmax <- max(curves$x, points$x)
+      ymax <- max(curves$y, points$y)
+      d$xb <- floor(80 * d$x / max(xmax, 1e-8))
+      d$yb <- floor(80 * d$y / max(ymax, 1e-8))
+      d$n <- 1L
+      d <- stats::aggregate(n ~ sex + xb + yb, d, sum)
+      d$x <- (d$xb + .5) * xmax / 80
+      d$y <- (d$yb + .5) * ymax / 80
+      plot <- plot + ggplot2::geom_point(data = d, ggplot2::aes(x, y, color = sex, size = n), alpha = .7) +
+        ggplot2::scale_size_area(max_size = 4)
+    } else plot <- plot + ggplot2::geom_point(data = d, ggplot2::aes(x, y, color = sex), size = 1.2, alpha = .65)
+  }
+  plot + ggplot2::labs(caption = paste0("Faint points: population display subset. Gray: outside the length window.\n",
+    if (show_samples) "Strong points: actual sampled adults in the saved trial." else
+      "Selection preview only: press Do Size-Selective Sampling to save new samples."))
 }

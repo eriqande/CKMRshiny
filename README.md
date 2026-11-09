@@ -12,6 +12,10 @@ The second tab, **Randomly unequal reproduction**, adds independently assigned
 gamma reproductive sampling weights, while keeping survey sampling uniform.
 The third tab, **Size-based reproduction**, connects age and individual growth
 to length-based reproductive sampling weights, still with uniform adult surveys.
+The fourth tab, **Breaking Stuff!**, uses the same growth/reproduction model but
+adds separate female and male length windows for adult sampling. Its estimator
+still assumes uniform sampling and targets total abundance, deliberately leaving
+the resulting bias uncorrected.
 
 ## Run
 
@@ -29,6 +33,25 @@ Editing the preparation controls only affects the next trial. Every replicate
 generates its own population, reproduction, and samples. All parents, including
 those with zero offspring or zero sampled offspring, appear in the relevant
 histograms.
+
+In **Breaking Stuff!**, first run a uniform-sampling baseline. Move the two-ended
+length sliders beneath the section 02 ERRO plots to preview eligibility. Drag
+either endpoint or the whole interval. Excluded regions and display adults turn
+gray; actual sample overlays are shown only when the windows match the saved
+trial. Pair counts and estimation results remain unchanged while previewing.
+Click **Do Size-Selective Sampling** to apply the windows to every replicate and
+save a new trial linked to its source. This regenerates the same populations and
+reproduction from their stage seeds, preserves the exact sampled offspring, and
+samples adults uniformly without replacement inside the windows. Changing one
+sex's window does not change the other sex's sample. Reapplying identical windows
+reproduces identical samples; a full-range window restores the uniform baseline.
+No trial is saved if any replicate has fewer eligible adults than requested.
+Source IDs and applied windows appear in the register and exports. Derived
+trials consume the same shared trial/sample budgets as new population trials.
+
+The expected pair-parent curve in section 03 uses ERRO sums restricted to eligible
+adults for selected trials, while the population histogram still includes every
+adult. This is a diagnostic expectation, not a correction to the abundance fit.
 
 Population/Reproduction and Sampling each have an independent button to switch
 the histogram y-axis between linear and log10 scales. This changes the view only.
@@ -231,8 +254,9 @@ reproduction. Simulation uses explicit Mersenne-Twister, Inversion, and Rejectio
 RNG settings and restores the caller's random state. Trials record schema
 version 2, the R version, and RNG settings. Regeneration requires compatible
 simulation code and RNG behavior; earlier trial schemas are not supported by
-the regeneration helper. Regeneration/resampling is currently an R API, not an
-app control. Sample data and summaries remain usable without regeneration.
+the regeneration helper. Length-window resampling is exposed in Breaking Stuff!;
+other changes to sampling seeds and sizes remain available through the R API.
+Sample data and summaries remain usable without regeneration.
 
 ## Checks
 
@@ -240,6 +264,7 @@ app control. Sample data and summaries remain usable without regeneration.
 Rscript tests/check-pop.R
 Rscript tests/check-random-reproduction.R
 Rscript tests/check-size-reproduction.R
+Rscript tests/check-selectivity.R
 ```
 
 Checks cover validation, RNG isolation, unequal sex sizes, census sampling,
@@ -255,3 +280,6 @@ preview boundaries, tab isolation, module namespaces, and shared storage budgets
 The size-based checks cover truncated ages, correlated growth, reproductive CV,
 equal-reproduction limits, exact regeneration/resampling, repeated pair parents,
 normalized histogram expectations, zero-match plots, and immutable trial settings.
+The selectivity checks cover fixed offspring samples, independent sex-specific
+sampling, full-window restoration, exact regeneration, eligible ERRO expectations,
+failure without partial saves, induced estimation bias, and four-tab budgets.

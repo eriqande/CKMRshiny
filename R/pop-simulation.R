@@ -375,6 +375,12 @@ pop_regenerate_rep <- function(replicate, Sf = replicate$settings$Sf,
   settings <- do.call(pop_settings, settings)
   seeds <- replicate$seeds
   if (!is.null(sampling_seed)) seeds$sampling <- sampling_seed
+  if (!is.null(replicate$sampling_windows)) {
+    source <- replicate
+    source$settings <- settings
+    source$seeds <- seeds
+    return(pop_resample_size_rep(source, replicate$sampling_windows, retain_population))
+  }
   .pop_build_rep(settings, replicate$seed, seeds, retain_population)
 }
 
@@ -654,4 +660,142 @@ pop_size_trial_table <- function(trials) {
       function(t) t$settings$size_model[[sex]][[name]], numeric(1))
   }
   result
+}
+
+#' Validate hard length-selection windows for both adult sexes
+#' @param windows Named list with Female and Male lower/upper length limits.
+#' Upper limits may be infinite for a full-range selection; lower limits must
+#' be finite and nonnegative. Endpoints are inclusive.
+#' @return Validated, consistently ordered Female and Male numeric vectors.
+#' @export
+pop_length_windows <- function(windows) {
+  if (!is.list(windows) || !setequal(names(windows), c("Female", "Male")))
+    stop("Length windows need Female and Male lower/upper limits.", call. = FALSE)
+  lapply(windows[c("Female", "Male")], function(w) {
+    if (!is.numeric(w) || length(w) != 2L || anyNA(w) ||
+        !is.finite(w[1]) || w[1] < 0 || w[2] <= w[1])
+      stop("Each length window needs 0 <= lower < upper.", call. = FALSE)
+    as.numeric(w)
+  })
+}
+
+#' Resample adults by length while preserving a replicate's population and kids
+#'
+#' Reconstructs the population and pedigree using the saved stage seeds, then
+#' samples each sex uniformly without replacement within its inclusive window.
+#' The sampled offspring are exactly the original uniform sample. Full-range
+#' adult samples also reproduce the original uniform baseline exactly. Separate
+#' deterministic sampling streams ensure changing one sex's window cannot
+#' change the other sex's sample. The estimator still targets total census N.
+#' @param replicate Saved size-based replicate, possibly already selected.
+#' @param windows Valid windows from pop_length_windows().
+#' @param retain_population Retain the temporarily regenerated population/pedigree.
+#' @return New replicate with selection metadata and compact eligible ERRO sums
+#' on the original population histogram bins. The input remains unchanged.
+#' @export
+pop_resample_size_rep <- function(replicate, windows, retain_population = FALSE) {
+  windows <- pop_length_windows(windows)
+  if (!identical(replicate$schema_version, 2L)) stop("Length selection needs a schema-version-2 replicate.")
+  if (!is.logical(retain_population) || length(retain_population) != 1L || is.na(retain_population))
+    stop("retain_population must be TRUE or FALSE.")
+  if (is.null(replicate$settings$size_model)) stop("Length selection needs a size-based population.")
+  full <- .pop_build_rep(replicate$settings, replicate$seed, replicate$seeds, TRUE)
+  selected <- list()
+  eligible_counts <- c(Female = 0L, Male = 0L)
+  selected_summary <- full$size_summary
+  selected_summary$count[] <- 0L
+  selected_summary$erro_sum[] <- 0
+  for (sex in c("Female", "Male")) {
+    w <- windows[[sex]]
+    adults <- full$population[full$population$sex == sex, ]
+    eligible <- adults[adults$length >= w[1] & adults$length <= w[2], ]
+    n <- nrow(eligible)
+    eligible_counts[sex] <- n
+    size <- full$settings[[if (sex == "Female") "Sf" else "Sm"]]
+    if (n < size) stop(sex, " window contains ", n, " eligible adults; ", size,
+      " are required. Widen the window or create a baseline with a smaller sample.", call. = FALSE)
+    key <- if (sex == "Female") "females" else "males"
+    if (n == nrow(adults)) selected[[key]] <- full$samples[[key]] else {
+      offset <- if (sex == "Female") 524287 else 999983
+      seed <- as.integer((as.double(full$seeds$sampling) - 1 + offset) %% .Machine$integer.max + 1)
+      selected[[key]] <- .pop_with_seed(seed, eligible[sample.int(n, size), ])
+    }
+    for (variable in c("length", "reproductive_weight")) {
+      rows <- which(selected_summary$sex == sex & selected_summary$variable == variable)
+      bins <- selected_summary[rows, ]
+      bin <- findInterval(eligible[[variable]], c(bins$lower, tail(bins$upper, 1)), all.inside = TRUE)
+      totals <- rowsum(eligible$reproductive_weight, bin, reorder = FALSE)
+      selected_summary$count[rows] <- tabulate(bin, nbins = nrow(bins))
+      selected_summary$erro_sum[rows[as.integer(rownames(totals))]] <- totals[, 1]
+    }
+  }
+  full$samples <- c(selected, list(kids = full$samples$kids))
+  full$pairs <- pop_identify_pairs(full$samples)
+  s <- full$settings
+  full$estimates <- pop_estimate(full$pairs, s$Sf, s$Sm, s$Sk)
+  full$sampling_windows <- windows
+  full$eligible_counts <- eligible_counts
+  full$selected_size_summary <- selected_summary
+  if (!retain_population) {
+    full$population <- NULL
+    full$pedigree <- NULL
+    full$storage <- "compact"
+  }
+  full
+}
+
+#' Apply fixed length windows to every replicate of an immutable source trial
+#'
+#' Each replicate is regenerated separately, keeping memory bounded by one
+#' population. Failure in any replicate aborts the operation without changing
+#' the source or returning a partially resampled trial. Sampling windows and
+#' source trial ID are retained for comparison and export.
+#' @param trial Source size-based trial.
+#' @param windows Female and Male inclusive length windows, shared across reps.
+#' @param trial_id Identifier for the new derived trial, distinct from its source.
+#' @param progress Optional function(completed, total), called after each rep.
+#' @return New trial with unchanged population/reproduction seeds and kid samples.
+#' @export
+pop_resample_size_trial <- function(trial, windows, trial_id, progress = NULL) {
+  .pop_integer(trial_id, "Trial ID")
+  if (trial_id == trial$trial_id) stop("A resampled trial needs a new trial ID.", call. = FALSE)
+  windows <- pop_length_windows(windows)
+  reps <- lapply(seq_along(trial$reps), function(i) {
+    r <- tryCatch(pop_resample_size_rep(trial$reps[[i]], windows),
+      error = function(e) stop("Replicate ", i, ": ", conditionMessage(e), call. = FALSE))
+    if (!is.null(progress)) progress(i, trial$num_reps)
+    r
+  })
+  result <- trial
+  result$source_trial_id <- trial$trial_id
+  result$trial_id <- as.integer(trial_id)
+  result$scenario <- "Breaking Stuff!"
+  result$sampling_windows <- windows
+  result$created_at <- Sys.time()
+  result$reps <- reps
+  result$summary <- tibble::as_tibble(do.call(rbind, lapply(seq_along(reps), function(i) {
+    x <- reps[[i]]$estimates
+    x$rep_id <- i
+    x$seed <- reps[[i]]$seed
+    x$truth <- ifelse(x$sex == "Female", trial$settings$Nf, trial$settings$Nm)
+    x
+  })))
+  result
+}
+
+#' Register size-selection trials with their source and applied windows
+#' @param trials Saved trials in the Breaking Stuff scenario.
+#' @return Size-model register with baseline/selected labels and length bounds.
+#' @export
+pop_selectivity_trial_table <- function(trials) {
+  result <- pop_size_trial_table(trials)
+  if (!length(trials)) return(result)
+  result$source_trial_id <- vapply(trials, function(t)
+    if (is.null(t$source_trial_id)) NA_integer_ else t$source_trial_id, integer(1))
+  result$sampling <- vapply(trials, function(t)
+    if (is.null(t$sampling_windows)) "Uniform baseline" else "Length window", character(1))
+  for (sex in c("Female", "Male")) for (i in 1:2)
+    result[[paste(tolower(sex), c("length_min", "length_max")[i], sep = "_")]] <-
+      vapply(trials, function(t) if (is.null(t$sampling_windows)) NA_real_ else t$sampling_windows[[sex]][i], numeric(1))
+  result[c("trial_id", "source_trial_id", "sampling", setdiff(names(result), c("trial_id", "source_trial_id", "sampling")))]
 }

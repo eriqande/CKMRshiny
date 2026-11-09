@@ -77,7 +77,9 @@ pop_app_ui <- function() {
       shiny::tabPanel("Randomly unequal reproduction",
         .pop_scenario_ui(ns = shiny::NS("unequal"), unequal = TRUE)),
       shiny::tabPanel("Size-based reproduction",
-        .pop_scenario_ui(ns = shiny::NS("size"), size_based = TRUE))
+        .pop_scenario_ui(ns = shiny::NS("size"), size_based = TRUE)),
+      shiny::tabPanel("Breaking Stuff!",
+        .pop_scenario_ui(ns = shiny::NS("breaking"), size_based = TRUE, selective = TRUE))
     )
   )
 }
@@ -86,12 +88,13 @@ pop_app_ui <- function() {
 #' @param ns Namespace function; identity for tab one, a Shiny namespace for tab two.
 #' @param unequal Whether to include the gamma introduction, controls, and section 00.
 #' @param size_based Include growth-based reproduction controls and trait figures.
+#' @param selective Include length-window previews and resampling controls.
 #' @return A tag list with the scenario introduction, sidebar, and sections 01-04.
 #' @keywords internal
-.pop_scenario_ui <- function(ns = identity, unequal = FALSE, size_based = FALSE) {
+.pop_scenario_ui <- function(ns = identity, unequal = FALSE, size_based = FALSE, selective = FALSE) {
   limits <- .pop_app_limits()
   shiny::tagList(
-        if (size_based) .pop_size_intro() else if (unequal) .pop_unequal_intro() else shiny::div(class = "section",
+        if (selective) .pop_selectivity_intro() else if (size_based) .pop_size_intro() else if (unequal) .pop_unequal_intro() else shiny::div(class = "section",
           shiny::h3("Start with the simplest possible population"),
           shiny::p("Imagine a population of females and males producing a single cohort of offspring. Each offspring has one mother and one father, chosen independently at random. All females have the same chance of being a mother, and all males have the same chance of being a father. Actual family sizes vary by chance, even though expected reproductive output is equal within each sex. There are no age or size differences, and no adults die between reproduction and sampling."),
           shiny::p("Take random samples of females, males, and offspring, then identify every parent-offspring pair within those samples. Use those matches to estimate female and male abundance separately. With sample sizes held fixed, a match is more likely in a smaller population."),
@@ -101,7 +104,7 @@ pop_app_ui <- function() {
           shiny::sidebarPanel(width = 3,
             shiny::h3("Prepare a trial"),
             if (unequal) shiny::checkboxInput(ns("use_weights"), "Use random reproductive sampling weights", value = TRUE),
-            shiny::p(class = "hint", "Each replicate creates a new population. These controls apply to the next trial."),
+            shiny::p(class = "hint", if (selective) "These controls create a new uniform-sampling baseline. Use section 02 to resample its existing populations by length." else "Each replicate creates a new population. These controls apply to the next trial."),
             shiny::h4("Population"),
             shiny::numericInput(ns("Nf"), "Females (Nf)", 1000, min = 1, max = limits$replicate_population, step = 100),
             shiny::numericInput(ns("Nm"), "Males (Nm)", 1000, min = 1, max = limits$replicate_population, step = 100),
@@ -114,7 +117,7 @@ pop_app_ui <- function() {
             shiny::numericInput(ns("num_reps"), "Replicates", 100, min = 1, max = limits$reps, step = 10),
             shiny::numericInput(ns("seed"), "First replicate seed", 1001, min = 1, step = 1),
             shiny::p(class = "hint", "Replicate r uses seed + r \u2212 1. The next seed advances after a successful trial."),
-            shiny::actionButton(ns("run_trial"), "Run and save trial", class = "btn-primary"),
+            shiny::actionButton(ns("run_trial"), if (selective) "Run and save uniform baseline" else "Run and save trial", class = "btn-primary"),
             shiny::hr(),
             shiny::p(class = "hint", paste0("Complete samples and population summaries are kept in this session. Limits: ",
               limits$trials, " trials; ", limits$trial_samples / 1e6,
@@ -157,12 +160,18 @@ pop_app_ui <- function() {
             ),
             shiny::div(class = "section",
               shiny::h3("02 \u00b7 Sampling"),
-              shiny::p("Females, males, and offspring are sampled independently without replacement. Each plot counts only sampled offspring belonging to sampled parents, including parents with no matches."),
+              shiny::p(if (selective) "Baseline samples are uniform. Length-window trials sample adults uniformly without replacement inside each sex's window; adults outside it cannot be sampled. The sampled offspring stay fixed. Histograms count sampled offspring belonging to sampled parents, including parents with no matches." else "Females, males, and offspring are sampled independently without replacement. Each plot counts only sampled offspring belonging to sampled parents, including parents with no matches."),
               shiny::tableOutput(ns("sampling_table")),
               if (size_based) shiny::tagList(
-                shiny::p("These are the actual sampled adults, drawn uniformly regardless of age, length, or reproductive sampling weight. Axes match the population views above."),
+                shiny::p(if (selective) "Preview length eligibility against the saved population display subset. Gray regions and points are outside the window. Strong points show actual samples only when the preview matches the saved settings. Axes match section 01." else "These are the actual sampled adults, drawn uniformly regardless of age, length, or reproductive sampling weight. Axes match the population views above."),
                 shiny::plotOutput(ns("sample_growth"), height = "300px"),
-                shiny::plotOutput(ns("sample_output"), height = "300px")
+                shiny::plotOutput(ns("sample_output"), height = "300px"),
+                if (selective) shiny::tagList(
+                  shiny::uiOutput(ns("length_controls")),
+                  shiny::textOutput(ns("selection_status")),
+                  shiny::actionButton(ns("apply_selection"), "Do Size-Selective Sampling", class = "btn-primary"),
+                  shiny::p(class = "hint", "Drag either endpoint or the interval between them. Moving a slider changes only the preview. The button applies these windows to every replicate, saves a new trial, and leaves the source unchanged. If any replicate has too few eligible adults, no trial is saved. Reapplying the same windows gives the same samples.")
+                )
               ),
               shiny::actionButton(ns("sampling_y_toggle"), "Y-axis: linear (switch to log10)"),
               shiny::plotOutput(ns("sampling_plot"), height = "290px")
@@ -174,19 +183,19 @@ pop_app_ui <- function() {
               shiny::plotOutput(ns("pairs_plot"), height = "310px"),
               if (size_based) shiny::tagList(
                 shiny::h4("Which adults appear in identified pairs?"),
-                shiny::p("For the selected replicate, compare normalized histograms of population adults, sampled adults, and parents represented once per identified pair. A parent with five matched offspring contributes five observations. Adult survey sampling is uniform; enrichment arises through reproduction."),
+                shiny::p(if (selective) "For the selected saved replicate, compare the full population, sampled adults, and parents represented once per identified pair. A parent with five matches contributes five observations. Both reproduction and length-selective adult sampling can enrich particular lengths." else "For the selected replicate, compare normalized histograms of population adults, sampled adults, and parents represented once per identified pair. A parent with five matched offspring contributes five observations. Adult survey sampling is uniform; enrichment arises through reproduction."),
                 shiny::actionButton(ns("pair_trait_toggle"), "Compare ERRO (switch to length)"),
                 shiny::plotOutput(ns("pair_traits_plot"), height = "auto"),
                 shiny::p(class = "hint", "The left axes show probability density. Each right axis gives identified pairs per bin for the solid outline only: density times that sex's number of pairs times bin width. Whole-number ticks show discrete pair counts. With no pairs, the count axis is omitted."),
-                shiny::p(class = "hint", "The dark dashed line shows the model expectation for pair parents, averaging over reproduction and uniform adult and offspring surveys. For mean-one ERRO r with population distribution f(r), this is r * f(r). In each bin we sum actual population ERROs and divide by total ERRO and bin width; the same reproductive weighting gives the expectation for length. All distributions use identical bins within each sex. With zero identified pairs, there is no observed-pair outline.")
+                shiny::p(class = "hint", if (selective) "The dark dashed line averages over reproduction and uniform sampling within the saved length windows: each eligible adult contributes its ERRO, and ineligible adults contribute zero. The pale bars still describe the entire population. This diagnostic curve does not correct the abundance estimator." else "The dark dashed line shows the model expectation for pair parents, averaging over reproduction and uniform adult and offspring surveys. For mean-one ERRO r with population distribution f(r), this is r * f(r). In each bin we sum actual population ERROs and divide by total ERRO and bin width; the same reproductive weighting gives the expectation for length. All distributions use identical bins within each sex. With zero identified pairs, there is no observed-pair outline.")
               )
             ),
             shiny::div(class = "section",
               shiny::h3("04 \u00b7 Estimation"),
-              shiny::p("For each sex, E(#pairs) = sampled-adults \u00d7 sampled-offspring / num-adults. The moment-based estimator is num-adults = sampled-adults \u00d7 sampled-offspring / observed-number-of-pairs."),
+              shiny::p(if (selective) "The uncorrected model assumes E(#pairs) = sampled adults \u00d7 sampled offspring / total adult abundance. Length-selective sampling can violate this assumption. We continue to estimate total adult abundance with the same moment-based and Poisson formulas." else "For each sex, E(#pairs) = sampled-adults \u00d7 sampled-offspring / num-adults. The moment-based estimator is num-adults = sampled-adults \u00d7 sampled-offspring / observed-number-of-pairs."),
               shiny::p("For each sex, abundance = sampled parents \u00d7 sampled offspring / observed pairs. The Poisson pseudo-likelihood uses that same expected pair count, so its continuous maximum gives the same point estimate."),
               shiny::p("Zero pairs give an unbounded estimate. Those replicates are counted in every panel, but cannot appear on a finite histogram axis. The likelihood is a working model."),
-              if (unequal || size_based) shiny::p("Uniform adult sampling preserves the expected pair count, but unequal reproductive sampling weights can increase variability between replicates. These Poisson intervals do not account for that additional variability; explore their finite 95% CI inclusion."),
+              if (selective) shiny::p("The estimator and Wald intervals still assume uniform adult sampling and target the full population, including adults outside the window. No selectivity correction is applied. Compare bias and finite 95% CI inclusion with the uniform baseline.") else if (unequal || size_based) shiny::p("Uniform adult sampling preserves the expected pair count, but unequal reproductive sampling weights can increase variability between replicates. These Poisson intervals do not account for that additional variability; explore their finite 95% CI inclusion."),
               shiny::plotOutput(ns("estimates_plot"), height = "460px"),
               shiny::h4("Approximate 95% confidence intervals"),
               shiny::p("Each thin line is one replicate, sorted from bottom to top by lower limit, then upper limit. The selected replicate has a thicker line and a point at its estimate. Both estimators give the same intervals here. Wald limits use the estimate plus or minus 1.96 standard errors; with few matches this approximation can be poor and lower limits may be negative. Zero matches have no Wald interval."),
@@ -195,7 +204,7 @@ pop_app_ui <- function() {
               shiny::p(class = "hint", "Median, mean, and CV summarize finite estimates only. CV is the sample standard deviation divided by the mean, shown as a percentage; it is unavailable with fewer than two finite estimates. For Poisson pseudo-MLE rows, finite 95% CI inclusion reports how many finite-replicate confidence intervals contain the true abundance, divided by the number of finite replicates. A single replicate is an illustration, not a distribution of estimation performance.")
             ),
             shiny::div(class = "section",
-              shiny::h3(paste0("Saved trials \u00b7 ", if (size_based) "Size-based reproduction" else if (unequal) "Randomly unequal reproduction" else "Equal reproduction")),
+              shiny::h3(paste0("Saved trials \u00b7 ", if (selective) "Breaking Stuff!" else if (size_based) "Size-based reproduction" else if (unequal) "Randomly unequal reproduction" else "Equal reproduction")),
               shiny::p("This scenario's register preserves the settings for each trial. Scroll across for seeds and summaries; select a trial above to explore its replicates."),
               shiny::div(class = "trial-scroll", shiny::tableOutput(ns("trial_register"))),
               shiny::textOutput(ns("storage_details"))
@@ -243,7 +252,7 @@ pop_app_ui <- function() {
                     "Start with about 1,000 adults of each sex and sample sizes giving 50 expected POPs for each sex. For example, use Nf = Nm = 1,000, Nk = 2,000, Sf = Sm = 100, and Sk = 500. Then multiply all three population sizes by 100 and all three sample sizes by 10, keeping the gamma shape parameters unchanged. The expected pair counts stay the same. In which population do the estimators perform better? Compare bias, CV, confidence-interval coverage, and the frequency of parents with multiple sampled offspring.")
                 )
               )
-            ) else if (size_based) shiny::div(class = "section",
+            ) else if (size_based && !selective) shiny::div(class = "section",
               shiny::h3("Questions to Ask / Things to Try"),
               shiny::tags$ol(
                 shiny::tags$li(
@@ -254,6 +263,14 @@ pop_app_ui <- function() {
                   shiny::p(shiny::strong("Look closely at the lengths of parents in identified POPs. "),
                     "In section 03, switch the comparison to length and compare the population, sampled adults, and parents represented in identified pairs. Which lengths are overrepresented among pair parents? Given that pattern, can you think of a way to break the POP abundance estimator? Which assumptions about how adults are sampled would you try changing?")
                 )
+              )
+            ) else if (selective) shiny::div(class = "section",
+              shiny::h3("Questions to Ask / Things to Try"),
+              shiny::tags$ol(
+                shiny::tags$li(shiny::p(shiny::strong("Catch only large adults, then only small adults. "),
+                  "Begin with a uniform baseline. Keep the male window full-range and change only the female window. Save large-adult and small-adult trials, then compare pair counts, abundance estimates, and confidence-interval inclusion. Which selection makes abundance look too small, and which makes it look too large?")),
+                shiny::tags$li(shiny::p(shiny::strong("Remove the link between length and reproduction. "),
+                  "Create a new baseline with the female length exponent and reproductive-output CV both set to zero. Repeat your length-window experiment. Does selecting particular lengths still bias the female abundance estimates? What does that tell you about why the earlier estimator failed?"))
               )
             )
           )
@@ -271,12 +288,13 @@ pop_app_ui <- function() {
 #' @param input,output,session Standard Shiny server arguments.
 #' @param unequal Whether this is the gamma-reproduction scenario.
 #' @param size_based Whether this is the length-based reproduction scenario.
+#' @param selective Enable length-window resampling of saved size-based trials.
 #' @param shared_usage Session usage shared across independent scenario registries.
 #' @return Used for its side effects on the Shiny session.
 #' @keywords internal
-.pop_scenario_server <- function(input, output, session, unequal = FALSE, shared_usage = NULL, size_based = FALSE) {
+.pop_scenario_server <- function(input, output, session, unequal = FALSE, shared_usage = NULL, size_based = FALSE, selective = FALSE) {
   if (is.null(shared_usage)) shared_usage <- .pop_session_usage()
-  scenario_key <- if (size_based) "size" else if (unequal) "unequal" else "equal"
+  scenario_key <- if (selective) "breaking" else if (size_based) "size" else if (unequal) "unequal" else "equal"
   ns <- session$ns
   trials <- shiny::reactiveVal(list())
   limits <- .pop_app_limits()
@@ -298,6 +316,28 @@ pop_app_ui <- function() {
   })
   current_rep <- shiny::reactive(current_trial()$reps[[current_rep_id()]])
 
+  register <- function(x) {
+    if (selective) pop_selectivity_trial_table(x) else
+      if (size_based) pop_size_trial_table(x) else pop_trial_table(x, include_weights = unequal)
+  }
+  save_trial <- function(trial) {
+    id <- trial$trial_id
+    saved <- trials()
+    saved[[as.character(id)]] <- trial
+    trials(saved)
+    shared_usage[[paste0("samples_", scenario_key)]] <- sum(vapply(saved, function(x)
+      sum(unlist(x$settings[c("Sf", "Sm", "Sk")])) * x$num_reps, numeric(1)))
+    shared_usage[[paste0("trials_", scenario_key)]] <- length(saved)
+    labels <- vapply(saved, function(x) {
+      paste0("Trial ", x$trial_id,
+               if (selective) if (is.null(x$sampling_windows)) " (uniform)" else paste0(" (from ", x$source_trial_id, ")") else "", " \u00b7 ", x$num_reps, " reps \u00b7 Nf ", x$settings$Nf,
+           " / Nm ", x$settings$Nm, " / Nk ", x$settings$Nk)
+    }, character(1))
+    shiny::updateSelectInput(session, "trial_id",
+                       choices = stats::setNames(names(saved), labels),
+                       selected = as.character(id))
+  }
+
   shiny::observeEvent(input$run_trial, {
     tryCatch({
       settings <- pop_settings(input$Nf, input$Nm, input$Nk, input$Sf, input$Sm, input$Sk,
@@ -307,26 +347,15 @@ pop_app_ui <- function() {
         size_model = if (size_based) .pop_size_inputs(input) else NULL)
       .pop_integer(input$seed, "Seed")
       .pop_check_budget(settings, input$num_reps,
-        shared_usage$samples_equal + shared_usage$samples_unequal + shared_usage$samples_size,
-        shared_usage$trials_equal + shared_usage$trials_unequal + shared_usage$trials_size, limits)
+        .pop_usage_total(shared_usage, "samples"),
+        .pop_usage_total(shared_usage, "trials"), limits)
       id <- length(trials()) + 1L
       trial <- shiny::withProgress(message = paste("Simulating trial", id), value = 0, {
         pop_run_trial(settings, input$num_reps, input$seed, id,
                        progress = function(done, total) shiny::setProgress(value = done / total))
       })
-      saved <- trials()
-      saved[[as.character(id)]] <- trial
-      trials(saved)
-      shared_usage[[paste0("samples_", scenario_key)]] <- sum(vapply(saved, function(x)
-        sum(unlist(x$settings[c("Sf", "Sm", "Sk")])) * x$num_reps, numeric(1)))
-      shared_usage[[paste0("trials_", scenario_key)]] <- length(saved)
-      labels <- vapply(saved, function(x) {
-        paste0("Trial ", x$trial_id, " \u00b7 ", x$num_reps, " reps \u00b7 Nf ", x$settings$Nf,
-               " / Nm ", x$settings$Nm, " / Nk ", x$settings$Nk)
-      }, character(1))
-      shiny::updateSelectInput(session, "trial_id",
-                                 choices = stats::setNames(names(saved), labels),
-                                 selected = as.character(id))
+      if (selective) trial$scenario <- "Breaking Stuff!"
+      save_trial(trial)
       shiny::updateNumericInput(session, "seed", value = min(.Machine$integer.max,
                                                             as.double(trial$seed) + trial$num_reps))
     }, error = function(e) shiny::showNotification(conditionMessage(e), type = "error", duration = 10))
@@ -350,6 +379,11 @@ pop_app_ui <- function() {
       shiny::p(paste0("Population: ", s$Nf, " females, ", s$Nm, " males, ", s$Nk,
                       " offspring. Samples: ", s$Sf, " females, ", s$Sm,
                       " males, ", s$Sk, " offspring.")),
+      if (selective) shiny::p(if (is.null(x$sampling_windows)) "Uniform adult-sampling baseline." else
+        paste0("Length-selected trial from trial ", x$source_trial_id, ". ",
+          paste(vapply(names(x$sampling_windows), function(sex)
+            paste0(sex, " window: ", paste(signif(x$sampling_windows[[sex]], 5), collapse = " to ")), character(1)), collapse = "; "),
+          ". Populations, reproduction, and sampled offspring are unchanged.")),
       if (size_based) shiny::tagList(lapply(c("Female", "Male"), function(sex) {
         p <- s$size_model[[sex]]
         shiny::p(paste0(sex, ": ", paste(paste(names(p), unlist(p), sep = "="), collapse = "; "), "."))
@@ -391,10 +425,15 @@ pop_app_ui <- function() {
   output$intervals_plot <- shiny::renderPlot(pop_plot_intervals(current_trial(), current_rep_id()))
   output$sampling_table <- shiny::renderTable({
     s <- current_trial()$settings
-    data.frame(Group = c("Females", "Males", "Offspring"),
+    result <- data.frame(Group = c("Females", "Males", "Offspring"),
                Population = c(s$Nf, s$Nm, s$Nk), Sample = c(s$Sf, s$Sm, s$Sk),
                `Sample fraction` = sprintf("%.1f%%", 100 * c(s$Sf / s$Nf, s$Sm / s$Nm, s$Sk / s$Nk)),
                check.names = FALSE)
+    if (selective) {
+      r <- current_rep()
+      result$`Eligible individuals` <- if (is.null(r$eligible_counts)) c(s$Nf, s$Nm, s$Nk) else c(r$eligible_counts, s$Nk)
+    }
+    result
   }, striped = TRUE)
   output$effective_numbers_table <- shiny::renderTable({
     x <- pop_effective_numbers(current_rep())
@@ -430,27 +469,29 @@ pop_app_ui <- function() {
   }, striped = TRUE)
   output$trial_register <- shiny::renderTable({
     shiny::req(length(trials()))
-    if (size_based) pop_size_trial_table(trials()) else pop_trial_table(trials(), include_weights = unequal)
+    register(trials())
   }, striped = TRUE, digits = 2)
   output$storage_details <- shiny::renderText({
     paste(length(trials()), "trials in this tab |",
-          shared_usage$trials_equal + shared_usage$trials_unequal + shared_usage$trials_size, "of", limits$trials, "session trial slots used |",
-          format(shared_usage$samples_equal + shared_usage$samples_unequal + shared_usage$samples_size, big.mark = ",", scientific = FALSE),
+          .pop_usage_total(shared_usage, "trials"), "of", limits$trials, "session trial slots used |",
+          format(.pop_usage_total(shared_usage, "samples"), big.mark = ",", scientific = FALSE),
           "of", format(limits$session_samples, big.mark = ",", scientific = FALSE),
           "sampled individuals retained across all replicates.")
   })
   output$download_trials <- shiny::downloadHandler(
-    filename = function() if (size_based) "ckmr-size-based-reproduction-trials.rds" else if (unequal) "ckmr-randomly-unequal-reproduction-trials.rds" else "ckmr-equal-reproduction-trials.rds",
+    filename = function() if (selective) "ckmr-breaking-stuff-trials.rds" else if (size_based) "ckmr-size-based-reproduction-trials.rds" else if (unequal) "ckmr-randomly-unequal-reproduction-trials.rds" else "ckmr-equal-reproduction-trials.rds",
     content = function(file) saveRDS(trials(), file)
   )
   output$download_register <- shiny::downloadHandler(
-    filename = function() if (size_based) "ckmr-size-based-reproduction-trials.csv" else if (unequal) "ckmr-randomly-unequal-reproduction-trials.csv" else "ckmr-equal-reproduction-trials.csv",
-    content = function(file) utils::write.csv(if (size_based) pop_size_trial_table(trials()) else pop_trial_table(trials(), include_weights = unequal), file, row.names = FALSE)
+    filename = function() if (selective) "ckmr-breaking-stuff-trials.csv" else if (size_based) "ckmr-size-based-reproduction-trials.csv" else if (unequal) "ckmr-randomly-unequal-reproduction-trials.csv" else "ckmr-equal-reproduction-trials.csv",
+    content = function(file) utils::write.csv(register(trials()), file, row.names = FALSE)
   )
   if (unequal) .pop_gamma_server(input, output, session)
   if (size_based) .pop_size_server(input, output, session, current_rep)
+  selection <- if (selective) .pop_selectivity_server(input, output, session,
+    current_trial, current_rep, save_trial, function() length(trials()) + 1L, shared_usage, limits) else NULL
   invisible(list(trials = trials, current_trial = current_trial, current_rep = current_rep,
-                 stored_individuals = stored_individuals))
+                 stored_individuals = stored_individuals, selection = selection))
 }
 
 #' Explain the random-reproduction scenario before its controls
@@ -533,8 +574,8 @@ pop_app_ui <- function() {
 #' @return Session-local reactive values for retained samples and trial slots.
 #' @keywords internal
 .pop_session_usage <- function() {
-  shiny::reactiveValues(samples_equal = 0, samples_unequal = 0, samples_size = 0,
-                        trials_equal = 0L, trials_unequal = 0L, trials_size = 0L)
+  shiny::reactiveValues(samples_equal = 0, samples_unequal = 0, samples_size = 0, samples_breaking = 0,
+                        trials_equal = 0L, trials_unequal = 0L, trials_size = 0L, trials_breaking = 0L)
 }
 
 #' Register the namespaced second scenario
@@ -557,17 +598,19 @@ pop_app_server <- function(input, output, session) {
   equal <- .pop_scenario_server(input, output, session, shared_usage = usage)
   unequal <- .pop_unequal_server("unequal", shared_usage = usage)
   size <- .pop_size_scenario_server("size", shared_usage = usage)
-  invisible(list(equal = equal, unequal = unequal, size = size, usage = usage))
+  breaking <- .pop_size_scenario_server("breaking", shared_usage = usage, selective = TRUE)
+  invisible(list(equal = equal, unequal = unequal, size = size, breaking = breaking, usage = usage))
 }
 
 #' Register the namespaced size-based scenario
 #' @param id Shiny module ID.
 #' @param shared_usage Optional shared session budgets.
+#' @param selective Enable the Breaking Stuff sampling experiment.
 #' @return Reactive handles for this scenario's saved trials and selection.
 #' @keywords internal
-.pop_size_scenario_server <- function(id, shared_usage = NULL) {
+.pop_size_scenario_server <- function(id, shared_usage = NULL, selective = FALSE) {
   shiny::moduleServer(id, function(input, output, session) {
-    .pop_scenario_server(input, output, session, shared_usage = shared_usage, size_based = TRUE)
+    .pop_scenario_server(input, output, session, shared_usage = shared_usage, size_based = TRUE, selective = selective)
   })
 }
 
@@ -687,4 +730,106 @@ pop_app_server <- function(input, output, session) {
       width <- session$clientData[[paste0("output_", session$ns("pair_traits_plot"), "_width")]]
       if (!is.null(width) && width < 562) 700 else 390
     })
+}
+
+#' Sum one storage-budget counter across every scenario registry
+#' @param usage Shared reactive values from .pop_session_usage().
+#' @param prefix Either samples or trials.
+#' @return Numeric total, reactive when called inside a reactive context.
+#' @keywords internal
+.pop_usage_total <- function(usage, prefix) {
+  sum(vapply(c("equal", "unequal", "size", "breaking"), function(s) {
+    value <- usage[[paste(prefix, s, sep = "_")]]
+    if (is.null(value)) 0 else value
+  }, numeric(1)))
+}
+
+#' Introduce the uncorrected length-selective sampling experiment
+#' @return A scenario introduction section, matching the size-based tab's biology.
+#' @keywords internal
+.pop_selectivity_intro <- function() {
+  shiny::div(class = "section", shiny::h3("Breaking Stuff!"),
+    shiny::p("So far, the POP estimator has performed remarkably well, even when adults differ greatly in reproductive output. In those scenarios, however, adults were sampled at random: an adult's chance of being sampled was independent of how many offspring it produced. Here we combine length-based reproduction with length-selective sampling. Explore how quickly the simple estimator can become biased when the adults we sample are no longer representative of the adult population."),
+    shiny::p("The growth, age, and fecundity model is the same as in the size-based reproduction tab. Create a uniform-sampling baseline, then choose separate female and male length windows in section 02. Each application saves a new trial using exactly the same populations, reproduction, and sampled offspring as its source. Adults are sampled uniformly within the chosen windows, with no sampling outside them."),
+    shiny::p("The abundance estimator and confidence intervals still assume uniform adult sampling and target total adult abundance. We deliberately leave them uncorrected. The adults span different ages, but all offspring belong to one cohort produced and sampled together; sampling is non-lethal, and only parent-offspring pairs are used."))
+}
+
+#' Find full-range length-window bounds spanning every replicate in a trial
+#' @param trial A saved size-based trial with compact population histograms.
+#' @return Female and Male windows beginning at zero and ending beyond all lengths.
+#' @keywords internal
+.pop_trial_length_bounds <- function(trial) {
+  stats::setNames(lapply(c("Female", "Male"), function(sex) {
+    upper <- max(vapply(trial$reps, function(r)
+      max(r$size_summary$upper[r$size_summary$sex == sex & r$size_summary$variable == "length"]), numeric(1)))
+    c(0, max(pretty(c(0, upper), n = 6)))
+  }), c("Female", "Male"))
+}
+
+#' Bind length-window previews and atomic, immutable trial resampling
+#'
+#' Window controls depend on the selected trial, not the displayed replicate.
+#' They span all replicate populations and reset to the saved settings when the
+#' selected trial changes. Moving them only previews selection; all saved-result
+#' figures retain their previous values until an explicit successful application.
+#' @param input,output,session Standard Shiny module arguments.
+#' @param current_trial,current_rep Reactive accessors for saved results.
+#' @param save_trial Commit callback used only after a complete successful trial.
+#' @param next_id Function returning the next trial ID in this registry.
+#' @param shared_usage Shared session budget counters.
+#' @param limits App budgets, applied to derived trials as well as new baselines.
+#' @return Reactive window and pending-status handles for integration checks.
+#' @keywords internal
+.pop_selectivity_server <- function(input, output, session, current_trial, current_rep,
+                                    save_trial, next_id, shared_usage, limits) {
+  bounds <- shiny::reactive(.pop_trial_length_bounds(current_trial()))
+  saved_windows <- shiny::reactive({
+    trial <- current_trial()
+    if (is.null(trial$sampling_windows)) bounds() else trial$sampling_windows
+  })
+  output$length_controls <- shiny::renderUI({
+    b <- bounds()
+    w <- saved_windows()
+    shiny::fluidRow(lapply(c("Female", "Male"), function(sex) {
+      shiny::column(6, shiny::sliderInput(session$ns(paste0(tolower(sex), "_length_window")),
+        paste(sex, "length window"), min = b[[sex]][1], max = b[[sex]][2],
+        value = w[[sex]], step = max(.001, 10^floor(log10(b[[sex]][2]) - 3)),
+        round = 3, dragRange = TRUE, width = "100%"))
+    }))
+  })
+  windows <- shiny::reactive({
+    shiny::req(length(input$female_length_window) == 2, length(input$male_length_window) == 2)
+    result <- tryCatch(pop_length_windows(list(Female = input$female_length_window,
+      Male = input$male_length_window)), error = identity)
+    shiny::validate(shiny::need(!inherits(result, "error"),
+      if (inherits(result, "error")) conditionMessage(result) else ""))
+    result
+  })
+  applied <- shiny::reactive(isTRUE(all.equal(windows(), saved_windows(), tolerance = 1e-7)))
+  output$selection_status <- shiny::renderText({
+    r <- current_rep()
+    w <- windows()
+    shown <- r$display_adults
+    eligible <- vapply(names(w), function(sex) sum(shown$sex == sex &
+      shown$length >= w[[sex]][1] & shown$length <= w[[sex]][2]), integer(1))
+    paste0(if (applied()) "Showing saved sampling settings. " else
+      "Preview only: downstream results still use the saved trial. ",
+      "Eligible adults in the display subset: ", eligible["Female"], " females; ", eligible["Male"],
+      " males. Exact eligibility is checked in every replicate when sampling is applied.")
+  })
+  output$sample_growth <- shiny::renderPlot(pop_plot_selectivity(current_rep(), windows(), "growth", applied()))
+  output$sample_output <- shiny::renderPlot(pop_plot_selectivity(current_rep(), windows(), "output", applied()))
+  shiny::observeEvent(input$apply_selection, {
+    tryCatch({
+      source <- current_trial()
+      .pop_check_budget(source$settings, source$num_reps,
+        .pop_usage_total(shared_usage, "samples"), .pop_usage_total(shared_usage, "trials"), limits)
+      trial <- shiny::withProgress(message = "Applying length windows to every replicate", value = 0, {
+        pop_resample_size_trial(source, windows(), next_id(), progress = function(done, total)
+          shiny::setProgress(value = done / total))
+      })
+      save_trial(trial)
+    }, error = function(e) shiny::showNotification(conditionMessage(e), type = "error", duration = 12))
+  })
+  invisible(list(windows = windows, applied = applied, bounds = bounds))
 }
