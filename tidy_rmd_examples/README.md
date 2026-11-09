@@ -11,8 +11,9 @@ Continue with [fit_delfi_S.Rmd](fit_delfi_S.Rmd) for **Sanctuary Sound**. This
 notebook currently covers the supplied growth/length model, explicit length bins,
 two-epoch age-length calibration, and a tidy table of observed comparison
 categories. A worked category expands both uncertain ages into 400 terms and
-shows their contributions in heat maps, including post-capture survival. It does
-not yet fit the demographic model or implement the efficient full likelihood.
+shows their contributions in heat maps, including post-capture survival. The
+double sum is then rearranged into precomputed age-tail weights. Inspectable
+tibbles feed a sparse matrix calculation and a three-parameter demographic fit.
 Known ages are used for calibration and omitted from the kin-analysis sample.
 Exact unordered-pair counts and Mark's same-cell approximation are kept separate.
 
@@ -21,13 +22,17 @@ Sanctuary's example-specific reusable functions live together in
 default to `../.hawaii-ckmr-26/datasets/samp_delfi_S.rda` and
 `../R/tidy-delfi-S.R`. As with Acme, paths resolve from the Rmd folder. The
 optional collapsed checks compare calibrated probabilities and Mark-compatible
-category counts with the original functions, and verify the one-row mixture.
-Set `check_mark_code: false` to render without those checks. Small analytic helper
+category counts with the original functions, and verify category probabilities,
+full likelihood values, and fitted parameters under Mark's same-cell conventions.
+The main fit uses exact unordered comparisons and sums both biological directions.
+Sanctuary's optional verification sections are skipped by default; set
+`check_mark_code: true` to run them. Small analytic helper
 checks can be run from the project root with `Rscript tests/check-tidy-delfi-S.R`.
 
 Open the Rmd in RStudio and run its chunks in order or click **Knit**. Required
 packages are `dplyr` (1.1.0 or newer), `tidyr`, `ggplot2`, `tibble`, `rmarkdown`,
-and `knitr`. Rendering HTML also requires Pandoc, included with RStudio.
+and `knitr`. Sanctuary also uses `Matrix` (normally supplied with R). Rendering
+HTML also requires Pandoc, included with RStudio.
 
 Change `data_path` in the first data-loading chunk, or edit the `data_path` YAML
 parameter. The current default is `../.hawaii-ckmr-26/datasets/samp_delfi_A.rda`, relative

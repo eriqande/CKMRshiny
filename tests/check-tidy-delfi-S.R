@@ -48,4 +48,37 @@ reverse <- tibble::tibble(L1=2L,Y1=2010L,L2=1L,Y2=2010L)
 r <- delfi_s_age_pair_example(reverse,known,log(1000),.02,.9,2005,5)
 stopifnot(abs(r$contribution-x$contribution) < 1e-12,
           r$contribution_2_to_1==0,r$contribution_1_to_2>0)
-cat("Sanctuary bins, Bayes calibration, maturity, both directions, and survival timing passed.\n")
+
+# Sparse evaluation must retain empty rows, add duplicate factors, and apply
+# each same-cell convention independently. These hand-specified weights have
+# an analytic answer, independent of the tibble preparation in the notebook.
+cats <- tibble::tibble(category_id = 1:3, n_comp = c(10, 3, 4),
+  n_comp_mark = c(10, 4.5, 4), n_MOP = c(1L, 0L, 0L),
+  same_cell = c(FALSE, TRUE, FALSE))
+terms <- tibble::tibble(category_id = c(1L, 1L, 1L, 2L),
+  offspring_birth_year = c(2008L, 2008L, 2004L, 2004L),
+  future_years = c(3L, 3L, 0L, 0L), age_weight = c(.2, .3, .1, .4))
+compiled <- delfi_s_compile_likelihood(cats, terms, y0 = 2005)
+mark_compiled <- delfi_s_compile_likelihood(cats, terms, y0 = 2005, convention = "mark")
+par <- c(log(1000), .02, qlogis(.8))
+analytic <- c(.5 * .8^3 / (1000 * exp(.02*3)) + .1 / (1000 * exp(-.02)),
+              .4 / (1000 * exp(-.02)), 0)
+p <- delfi_s_probabilities(par, compiled)
+pm <- delfi_s_probabilities(par, mark_compiled)
+stopifnot(max(abs(p - analytic)) < 1e-14,
+  max(abs(pm - analytic * c(1, .5, 1))) < 1e-14,
+  abs(delfi_s_negloglik(par, compiled) + sum(dpois(cats$n_MOP, cats$n_comp * analytic, log=TRUE))) < 1e-12,
+  abs(delfi_s_negloglik(par, mark_compiled) + sum(dpois(cats$n_MOP, cats$n_comp_mark * pm, log=TRUE))) < 1e-12,
+  is.infinite(delfi_s_negloglik(c(NA, 0, 0), compiled)))
+
+# All-impossible categories are valid if no matches occurred, including a
+# completely empty demographic grid. A match in such a category gives Inf.
+empty <- terms[FALSE, ]
+zero_cats <- cats
+zero_cats$n_MOP <- 0L
+zero_compiled <- delfi_s_compile_likelihood(zero_cats, empty, y0 = 2005)
+stopifnot(all(delfi_s_probabilities(par, zero_compiled) == 0),
+          delfi_s_negloglik(par, zero_compiled) == 0)
+zero_compiled$observed[1] <- 1L
+stopifnot(is.infinite(delfi_s_negloglik(par, zero_compiled)))
+cat("Sanctuary calibration, explicit age mixtures, sparse likelihood, and conventions passed.\n")

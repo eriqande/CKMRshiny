@@ -12,7 +12,7 @@ output:
 params:
   data_path: "../.hawaii-ckmr-26/datasets/samp_delfi_S.rda"
   helper_path: "../R/tidy-delfi-S.R"
-  check_mark_code: true
+  check_mark_code: false
 ---
 
 <style>
@@ -45,7 +45,7 @@ theme_set(theme_minimal(base_size = 13))
 options(dplyr.summarise.inform = FALSE)
 if (!exists("params", inherits = FALSE)) {
   params <- list(data_path = "../.hawaii-ckmr-26/datasets/samp_delfi_S.rda",
-                 helper_path = "../R/tidy-delfi-S.R", check_mark_code = TRUE)
+                 helper_path = "../R/tidy-delfi-S.R", check_mark_code = FALSE)
 }
 source(params$helper_path, local = TRUE, encoding = "UTF-8")
 epoch_levels <- c("Through 2015", "After 2015")
@@ -61,12 +61,13 @@ until that birth. Neither member of a pair is assigned a parent/offspring role
 from its measured length alone.
 
 We follow Mark's `fit_delfi_S.r` through the age-length calibration and category
-counts. Then we expand **one** category over its possible ages. We do not yet
-fit the demographic model or implement the efficient full likelihood.
+counts. We expand **one** category over its possible ages, then rearrange the
+sum to prepare fixed age weights and fit an efficient full likelihood.
 
 Preparation remains visible below. Repeated calculations are functions in
 `R/tidy-delfi-S.R`, ordered as we use them. The core analysis needs the same
-packages as the Acme notebook; Mark's packages are used only by the optional
+packages as the Acme notebook, plus `Matrix` for sparse matrix multiplication;
+Mark's packages are used only by the optional
 cross-check at the end.
 
 # Meet the data and supplied growth model
@@ -821,25 +822,232 @@ age_pairs |>
   knitr::kable(digits = 8)
 ```
 
-# What is ready for the likelihood?
+# Separate the fixed and parameter-dependent calculations
 
-We now have two explicit inputs:
+## Rearrange the double sum
 
-* `categories`: observed length/year categories, comparison exposure, and MOP
-  counts, including the zero-match categories.
-* `age_key_by_year`: the calibrated probability distribution over working ages
-  for each observed length/year cell.
+For direction $2\to1$, fix $a_1$ and hence $b_1=y_1-a_1$. Neither survival
+from individual 2's capture to that birth nor abundance at that birth depends
+on $a_2$. We can move those factors outside the inner sum:
 
-The demographic parameters will change the abundance and survival factors.
-The age-mixture probabilities and maturity conditions can be prepared in advance.
-The next stage will turn the one-row reference calculation into an efficient
-full objective and compare it with Mark's implementation.
+\[
+p_{2\to1,c}=
+\sum_{a_1}w_1(a_1)\frac{s^{\max(0,b_1-y_2)}}{N_{b_1}}
+\underbrace{\sum_{a_2}w_2(a_2)
+\mathbf1\{a_2\ge y_2-b_1+A_{\mathrm{mat}}\}}_{T_2(b_1):\ \text{precompute}}.
+\]
+
+The inner sum $T_2(b_1)$ is the probability that individual 2 was mature at
+individual 1's possible birth. It is a tail probability of the calibrated
+age distribution. Repeat with 1 and 2 exchanged, then add both directions.
+We now need at most 20 terms per direction, rather than 400 age pairs.
+
+Both $w_1$ and $T_2$ are fixed in this two-stage analysis. If we estimated the
+age distributions jointly with demography, the rearrangement would still hold,
+but their values would need updating during optimization.
+
+## Calculate each age tail once
+
+Within an epoch, every sample in a given length bin uses the same age
+distribution. We compute its reverse cumulative sum **once per epoch and
+length bin**, then reuse it for every year and category that needs it. At
+threshold 1 the tail is one; beyond the working age cap it is zero. The
+age-20+ approximation remains exactly as described earlier.
+
+```{r precompute-age-tails}
+age_tails <- working_age_key |>
+  arrange(epoch, bin_id, desc(age)) |>
+  group_by(epoch, bin_id) |>
+  mutate(p_age_at_least = cumsum(p_age_given_length)) |>
+  ungroup() |>
+  arrange(epoch, bin_id, age)
+
+age_tails |>
+  filter(bin_id == example_category$L2) |>
+  select(epoch, bin_id, age, p_age_given_length, p_age_at_least) |>
+  slice_head(n = 10) |>
+  knitr::kable(digits = 6)
+```
+
+For fitting and comparison, retain every category with positive Mark-compatible
+exposure. This also retains singleton same-cell categories, whose **exact**
+exposure is zero. They contribute zero to the exact likelihood. We keep both
+exposure columns so that changing conventions never changes the observed data.
+
+```{r prepare-directional-terms}
+likelihood_categories <- comparison_grid |>
+  filter(n_comp_mark > 0) |>
+  left_join(match_counts, by = c("cell_1", "cell_2"), relationship = "one-to-one") |>
+  replace_na(list(n_MOP = 0L)) |>
+  mutate(category_id = row_number())
+
+# Describe both possible biological directions using the same column names.
+directions <- bind_rows(
+  likelihood_categories |>
+    transmute(category_id, direction = "2 is mother of 1",
+      offspring_year = Y1, offspring_bin = L1, mother_year = Y2, mother_bin = L2),
+  likelihood_categories |>
+    transmute(category_id, direction = "1 is mother of 2",
+      offspring_year = Y2, offspring_bin = L2, mother_year = Y1, mother_bin = L1)
+)
+
+age_terms <- directions |>
+  left_join(age_key_by_year |>
+      transmute(offspring_year = year, offspring_bin = bin_id,
+                offspring_age = age, offspring_age_probability = p_age_given_length),
+    by = c("offspring_year", "offspring_bin"), relationship = "many-to-many") |>
+  mutate(offspring_birth_year = offspring_year - offspring_age,
+         minimum_mother_age = mother_year - offspring_birth_year + Amat,
+         tail_age = pmax(1L, minimum_mother_age),
+         mother_epoch = if_else(mother_year <= 2015, epoch_levels[1], epoch_levels[2]),
+         future_years = pmax(0, offspring_birth_year - mother_year)) |>
+  left_join(age_tails |>
+      transmute(mother_epoch = epoch, mother_bin = bin_id, tail_age = age,
+                p_mother_mature = p_age_at_least),
+    by = c("mother_epoch", "mother_bin", "tail_age"), relationship = "many-to-one") |>
+  mutate(p_mother_mature = if_else(minimum_mother_age > Auplim, 0, p_mother_mature),
+         age_weight = offspring_age_probability * p_mother_mature)
+stopifnot(!anyNA(age_terms), all(age_terms$age_weight >= 0))
+
+example_id <- likelihood_categories |>
+  filter(cell_1 == example_category$cell_1, cell_2 == example_category$cell_2) |>
+  pull(category_id)
+age_terms |>
+  filter(category_id == example_id, age_weight > 0) |>
+  select(direction, offspring_age, offspring_birth_year, minimum_mother_age,
+         offspring_age_probability, p_mother_mature, age_weight, future_years) |>
+  slice_head(n = 12) |>
+  knitr::kable(digits = 6)
+```
+
+Here `p_mother_mature` is $T_2(b_1)$ (or $T_1(b_2)$ in the reverse direction),
+and `age_weight` is $w_1(a_1)T_2(b_1)$. Survival **durations** are fixed;
+survival **probabilities** still depend on $s$.
+
+## Reuse the demographic factors with a sparse matrix
+
+Many terms also share an offspring birth year $b$ and survival duration $d$.
+They therefore share the same parameter-dependent factor:
+
+\[
+h_{b,d}(\theta)=\frac{s^d}{N_b}
+=\exp\{-\log N_{y_0}-r(b-y_0)+d\log s\}.
+\]
+
+We calculate that factor once per distinct $(b,d)$ combination. A fixed matrix
+$W$ then adds it to the categories with the appropriate age weights:
+
+\[
+\boldsymbol p=W\boldsymbol h(\theta).
+\]
+
+Rows of $W$ correspond to the category tibble; columns correspond to an
+inspectable `demographic_grid` of $(b,d)$ combinations. The compiler adds
+weights when multiple terms use the same row and column. It stores only
+nonzero entries, so we do not allocate a large dense matrix. **Here "compile"
+means preparing a numeric representation, not compiling source code.**
+
+```{r compile-age-weights}
+nonzero_age_terms <- age_terms |> filter(age_weight > 0)
+compiled <- delfi_s_compile_likelihood(likelihood_categories, nonzero_age_terms,
+                                      y0 = y0, convention = "exact")
+compiled$demographic_grid |> slice_head(n = 10) |> knitr::kable()
+tibble(categories = nrow(compiled$age_weights),
+       distinct_demographic_factors = ncol(compiled$age_weights),
+       nonzero_matrix_entries = Matrix::nnzero(compiled$age_weights),
+       directional_age_terms = nrow(nonzero_age_terms)) |> knitr::kable()
+```
+
+For this dataset, all `r nrow(compiled$age_weights)` category probabilities
+share just `r ncol(compiled$age_weights)` distinct demographic factors. Those
+factors change during optimization; the matrix that distributes them across
+categories does not. The weighted sums still require work, but there is no
+need to recompute the age mixtures at every evaluation.
+
+The functions `delfi_s_probabilities()` and `delfi_s_negloglik()` in the helper
+file now contain only parameter transformations, the demographic factors,
+matrix multiplication, and the Poisson sum. There are no joins, age-tail
+calculations, or 20-by-20 expansions inside the objective.
+
+```{r evaluate-efficient-likelihood}
+example_params <- c(log_N0 = example_parameters$log_N0,
+  growth_rate = example_parameters$growth_rate,
+  logit_survival = qlogis(example_parameters$annual_survival))
+efficient_probabilities <- delfi_s_probabilities(example_params, compiled)
+stopifnot(abs(efficient_probabilities[example_id] - example_probability) < 1e-12)
+tibble(explicit_age_pair_probability = example_probability,
+       precomputed_probability = efficient_probabilities[example_id],
+       full_negative_loglikelihood = delfi_s_negloglik(example_params, compiled)) |>
+  knitr::kable(digits = 10)
+```
+
+The expected count in category $c$ remains
+$\lambda_c=C_c p_c$, and the objective is still
+$-\sum_c\log\operatorname{Poisson}(n_c;\lambda_c)$.
+Zero-match categories remain in this sum. A structurally impossible category
+has $p_c=0$: its contribution is zero when $n_c=0$, and its likelihood is
+zero when $n_c>0$. Base R's `dpois()` handles both cases directly.
+
+## Fit the demographic model
+
+We optimize the same three transformed parameters as Mark: log initial
+abundance, growth rate, and logit annual survival. The exact unordered-pair
+convention is used here. A separate compatibility calculation below reproduces
+Mark's same-cell conventions without changing this fit.
+
+```{r fit-efficient-model}
+fit <- optim(example_params, delfi_s_negloglik, compiled = compiled,
+             method = "BFGS", control = list(reltol = 1e-10, maxit = 1000))
+stopifnot(fit$convergence == 0, is.finite(fit$value))
+tibble(reference_year = y0, N_at_reference = exp(fit$par[1]),
+       growth_rate = fit$par[2], annual_survival = plogis(fit$par[3]),
+       negative_loglikelihood = fit$value) |> knitr::kable(digits = 5)
+```
+
+The age keys are still treated as fixed, and their calibration uncertainty is
+not included. This calculation changes how we evaluate the age mixture; it
+does not remove the modeling approximations described above.
 
 <details class="optional-checks">
-<summary>Optional checks: compare calibration and category counts with Mark's functions</summary>
+<summary>Check the rearranged sum against explicit age-pair calculations</summary>
+
+These optional verification sections are skipped by default. Set
+`check_mark_code: true` in the YAML header to run them.
+
+We check several categories, including same-cell comparisons and categories
+without observed matches, at several parameter values. This tests both
+directions and the survival/abundance factors away from a fitted optimum.
+
+```{r compare-explicit-age-sums, eval=isTRUE(params$check_mark_code)}
+check_ids <- unique(c(example_id,
+  head(which(likelihood_categories$same_cell), 3),
+  head(which(likelihood_categories$n_MOP > 0), 3),
+  round(seq(1, nrow(likelihood_categories), length.out = 8))))
+check_parameters <- rbind(example_params,
+  c(log(3000), -.02, qlogis(.6)), c(log(9000), .04, qlogis(.95)))
+explicit_checks <- bind_rows(lapply(seq_len(nrow(check_parameters)), function(k) {
+  par <- check_parameters[k, ]
+  fast <- delfi_s_probabilities(par, compiled)
+  reference <- vapply(check_ids, function(i) {
+    terms <- delfi_s_age_pair_example(likelihood_categories[i, ], age_key_by_year,
+      log_N0 = par[1], growth_rate = par[2], annual_survival = plogis(par[3]),
+      y0 = y0, maturity_age = Amat)
+    sum(terms$contribution)
+  }, numeric(1))
+  tibble(parameter_set = k, categories_checked = length(check_ids),
+         largest_probability_difference = max(abs(fast[check_ids] - reference)))
+}))
+stopifnot(max(explicit_checks$largest_probability_difference) < 1e-12)
+explicit_checks |> knitr::kable(digits = 14)
+```
+
+</details>
+
+<details class="optional-checks">
+<summary>Optional checks: compare calibration, categories, and likelihood with Mark's functions</summary>
 
 These checks use the chosen dataset's `r-scripts/ckmr_funs.r`; they do not run
-the interactive driver. Set `check_mark_code: false` to skip execution. The tidy
+the interactive driver. Set `check_mark_code: true` to enable execution. The tidy
 preparation above does not require Mark's packages.
 
 ```{r compare-with-mark, message=FALSE}
@@ -926,20 +1134,57 @@ if (can_check) {
   tibble(tidy_example_probability = example_probability,
          Mark_example_probability = as.numeric(mark_probability)) |>
     knitr::kable(digits = 10)
+
+  # Reproduce both of Mark's same-cell conventions, separately from the exact fit.
+  mark_compiled <- delfi_s_compile_likelihood(likelihood_categories, nonzero_age_terms,
+                                            y0 = y0, convention = "mark")
+  mark_likelihood_checks <- bind_rows(lapply(seq_len(nrow(check_parameters)), function(k) {
+    par <- check_parameters[k, ]
+    original_loglik <- mark_loglik(par)
+    # Strip offarray's indexing class for ordinary positional array indexing.
+    probabilities <- array(as.numeric(mark_prepared$Pr_MOP_LY1LY2),
+                           dim = dim(mark_prepared$Pr_MOP_LY1LY2))
+    idx <- with(likelihood_categories,
+      cbind(L1, match(Y1, year_grid), L2, match(Y2, year_grid)))
+    original_probabilities <- probabilities[idx]
+    fast_probabilities <- delfi_s_probabilities(par, mark_compiled)
+    tibble(parameter_set = k,
+      largest_probability_difference = max(abs(original_probabilities - fast_probabilities)),
+      negative_loglik_difference = delfi_s_negloglik(par, mark_compiled) + original_loglik)
+  }))
+  stopifnot(max(mark_likelihood_checks$largest_probability_difference) < 1e-12,
+            max(abs(mark_likelihood_checks$negative_loglik_difference)) < 1e-7)
+  knitr::kable(mark_likelihood_checks, digits = 12)
+
+  # Compare optima using the same objective convention and starting point.
+  compatible_fit <- optim(example_params, delfi_s_negloglik, compiled = mark_compiled,
+    method = "BFGS", control = list(reltol = 1e-10, maxit = 1000))
+  original_fit <- optim(example_params, function(par) -mark_loglik(par),
+    method = "BFGS", control = list(reltol = 1e-10, maxit = 1000))
+  stopifnot(compatible_fit$convergence == 0, original_fit$convergence == 0,
+    max(abs(compatible_fit$par - original_fit$par)) < 1e-4,
+    abs(compatible_fit$value - original_fit$value) < 1e-7)
+  tibble(calculation = c("Exact unordered comparisons", "Mark-compatible matrix", "Original Mark code"),
+    N_at_reference = exp(c(fit$par[1], compatible_fit$par[1], original_fit$par[1])),
+    growth_rate = c(fit$par[2], compatible_fit$par[2], original_fit$par[2]),
+    annual_survival = plogis(c(fit$par[3], compatible_fit$par[3], original_fit$par[3])),
+    negative_loglikelihood = c(fit$value, compatible_fit$value, original_fit$value)) |>
+    knitr::kable(digits = 6)
 } else {
   cat("Mark-code checks skipped. They require check_mark_code = TRUE, the function file,\n",
       "and packages: ", paste(mark_packages, collapse = ", "), ".\n", sep = "")
 }
 ```
 
-There is an additional same-cell convention to resolve before fitting the full
-model: Mark halves the sum of the two directed probabilities when both members
+There is an additional same-cell convention in Mark's implementation: he
+halves the sum of the two directed probabilities when both members
 have the same observed length/year category. Same-cell exposure already has a
 half-factor. For exact unordered pairs of distinct individuals, the two possible
 mother/daughter directions are mutually exclusive and their probabilities add.
-Our worked example deliberately uses different cells, where this issue does
-not arise and both calculations agree. The exact and Mark-compatible exposure
-columns above keep the bookkeeping differences visible for the next stage.
+Our worked example uses different cells, where this issue does not arise.
+The main fit uses exact unordered comparisons and sums both biological
+directions. The compatibility calculation reproduces Mark's conventions solely
+to verify the rearranged computation; the table shows both fits explicitly.
 
 </details>
 

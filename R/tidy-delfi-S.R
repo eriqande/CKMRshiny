@@ -1,6 +1,6 @@
 # Sanctuary Sound helpers, ordered as they are introduced in fit_delfi_S.Rmd.
 # Data preparation stays visible in the notebook. These functions handle the
-# calculations that are repeated during calibration or the worked age mixture.
+# calculations that are repeated during calibration, age mixing, or fitting.
 
 #' Describe left-closed length bins, including both open-ended tails
 #' @param cuts Strictly increasing finite length boundaries.
@@ -119,4 +119,86 @@ delfi_s_age_pair_example <- function(category, age_key_by_year, log_N0,
       contribution_1_to_2 = joint_age_probability * p_1_mother_of_2,
       contribution = contribution_2_to_1 + contribution_1_to_2
     )
+}
+
+#' Compile fixed age-mixture terms into a sparse category-by-demography matrix
+#'
+#' Each column represents one distinct offspring birth year and prospective
+#' survival duration. Duplicate contributions to the same category/column are
+#' added by sparseMatrix, including contributions from opposite directions.
+#' No demographic parameters enter this preparation. Rebuild it if categories,
+#' age keys, maturity, age support, or the reference year change.
+#' @param categories Tibble with consecutive category_id values 1 through nrow,
+#' n_comp (exact exposure), n_comp_mark (Mark-compatible exposure), n_MOP,
+#' and same_cell. Zero-exposure, zero-match rows are allowed.
+#' @param age_terms Tibble with category_id, offspring_birth_year, future_years,
+#' and age_weight, after mixing over possible maternal ages. Zero weights may
+#' be omitted; every category retains its row even if all weights are zero.
+#' @param y0 Reference year for exponential adult female abundance.
+#' @param convention Either "exact" for unordered distinct pairs with both
+#' biological directions, or "mark" for Mark's same-cell exposure and additional
+#' half-factor on same-cell probabilities. These conventions are explicit
+#' alternatives; the Mark option exists for comparison with the original code.
+#' @return List with the sparse age_weights matrix, inspectable demographic_grid,
+#' observed counts, comparison counts, probability scale, and convention.
+#' @export
+delfi_s_compile_likelihood <- function(categories, age_terms, y0,
+                                       convention = c("exact", "mark")) {
+  convention <- match.arg(convention)
+  stopifnot(nrow(categories) > 0,
+    identical(as.integer(categories$category_id), seq_len(nrow(categories))),
+    length(y0) == 1L, is.finite(y0),
+    all(is.finite(age_terms$age_weight)), all(age_terms$age_weight >= 0),
+    all(age_terms$category_id %in% categories$category_id),
+    all(is.finite(age_terms$offspring_birth_year)),
+    all(is.finite(age_terms$future_years)), all(age_terms$future_years >= 0),
+    all(is.finite(categories$n_MOP)), all(categories$n_MOP >= 0))
+  demographic_grid <- age_terms |>
+    dplyr::distinct(offspring_birth_year, future_years) |>
+    dplyr::arrange(offspring_birth_year, future_years) |>
+    dplyr::mutate(term_id = dplyr::row_number(),
+                  years_from_reference = offspring_birth_year - y0)
+  indexed_terms <- age_terms |>
+    dplyr::left_join(demographic_grid,
+      by = c("offspring_birth_year", "future_years"), relationship = "many-to-one")
+  weights <- Matrix::sparseMatrix(i = indexed_terms$category_id,
+    j = indexed_terms$term_id, x = indexed_terms$age_weight,
+    dims = c(nrow(categories), nrow(demographic_grid)))
+  comparisons <- if (convention == "exact") categories$n_comp else categories$n_comp_mark
+  stopifnot(all(is.finite(comparisons)), all(comparisons >= 0),
+    all(categories$n_MOP[comparisons == 0] == 0))
+  list(age_weights = weights, demographic_grid = demographic_grid,
+    observed = categories$n_MOP, comparisons = comparisons,
+    probability_scale = if (convention == "mark") ifelse(categories$same_cell, .5, 1) else rep(1, nrow(categories)),
+    convention = convention)
+}
+
+#' Evaluate all Sanctuary Sound category probabilities from fixed age weights
+#' @param params Numeric vector: log N at y0, exponential growth rate, logit
+#' annual survival. The order matches Mark's demographic parameter vector.
+#' @param compiled Result of delfi_s_compile_likelihood().
+#' @return Numeric probability vector in the original category row order.
+#' @export
+delfi_s_probabilities <- function(params, compiled) {
+  stopifnot(length(params) == 3L)
+  grid <- compiled$demographic_grid
+  # log.p avoids first rounding survival to one for large positive logits.
+  log_survival <- plogis(params[3], log.p = TRUE)
+  demographic_factor <- exp(-params[1] - params[2] * grid$years_from_reference +
+                             grid$future_years * log_survival)
+  as.numeric(compiled$age_weights %*% demographic_factor) * compiled$probability_scale
+}
+
+#' Evaluate the Poisson negative log pseudolikelihood for Sanctuary Sound
+#' @param params Numeric vector: log initial abundance, growth rate, logit survival.
+#' @param compiled Result of delfi_s_compile_likelihood().
+#' @return Scalar negative log likelihood, including Poisson constants. Invalid
+#' numerical proposals return Inf. Structural zero probabilities are retained:
+#' dpois(0, 0, log = TRUE) is zero; a positive count with zero mean gives Inf.
+#' @export
+delfi_s_negloglik <- function(params, compiled) {
+  if (length(params) != 3L || any(!is.finite(params))) return(Inf)
+  expected <- compiled$comparisons * delfi_s_probabilities(params, compiled)
+  if (any(!is.finite(expected)) || any(expected < 0)) return(Inf)
+  -sum(dpois(compiled$observed, lambda = expected, log = TRUE))
 }
