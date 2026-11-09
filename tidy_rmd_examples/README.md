@@ -7,6 +7,24 @@ individuals sampled as adults. Pair entries are individual IDs. Preparation is s
 inspectable tables, figures, and mathematics. Preparation stays inline;
 likelihood functions are introduced when repeated evaluation becomes useful.
 
+Continue with [fit_delfi_S.Rmd](fit_delfi_S.Rmd) for **Sanctuary Sound**. This
+notebook currently covers the supplied growth/length model, explicit length bins,
+two-epoch age-length calibration, and a tidy table of observed comparison
+categories. A worked category expands both uncertain ages into 400 terms and
+shows their contributions in heat maps, including post-capture survival. It does
+not yet fit the demographic model or implement the efficient full likelihood.
+Known ages are used for calibration and omitted from the kin-analysis sample.
+Exact unordered-pair counts and Mark's same-cell approximation are kept separate.
+
+Sanctuary's example-specific reusable functions live together in
+[R/tidy-delfi-S.R](../R/tidy-delfi-S.R), in order of use. Its YAML parameters
+default to `../.hawaii-ckmr-26/datasets/samp_delfi_S.rda` and
+`../R/tidy-delfi-S.R`. As with Acme, paths resolve from the Rmd folder. The
+optional collapsed checks compare calibrated probabilities and Mark-compatible
+category counts with the original functions, and verify the one-row mixture.
+Set `check_mark_code: false` to render without those checks. Small analytic helper
+checks can be run from the project root with `Rscript tests/check-tidy-delfi-S.R`.
+
 Open the Rmd in RStudio and run its chunks in order or click **Knit**. Required
 packages are `dplyr` (1.1.0 or newer), `tidyr`, `ggplot2`, `tibble`, `rmarkdown`,
 and `knitr`. Rendering HTML also requires Pandoc, included with RStudio.

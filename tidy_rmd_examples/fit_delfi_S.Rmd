@@ -1,0 +1,948 @@
+---
+title: "Sanctuary Sound: age uncertainty and a tidy table of POP categories"
+author: "A companion to Mark's fit_delfi_S example"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: show
+    theme: readable
+    self_contained: true
+params:
+  data_path: "../.hawaii-ckmr-26/datasets/samp_delfi_S.rda"
+  helper_path: "../R/tidy-delfi-S.R"
+  check_mark_code: true
+---
+
+<style>
+.main-container table { display: block; max-width: 100%; overflow-x: auto; }
+.main-container pre {
+  max-width: 100%; overflow-x: auto; white-space: pre !important;
+  word-break: normal !important; overflow-wrap: normal !important; word-wrap: normal !important;
+}
+.main-container pre code {
+  white-space: inherit !important; word-break: normal !important;
+  overflow-wrap: normal !important; word-wrap: normal !important;
+}
+details.optional-checks {
+  margin: 1.5em 0; padding: 0.85em 1em;
+  border: 1px solid #c7d9dc; border-left: 4px solid #237e83;
+  border-radius: 5px; background: #f5f9f9;
+}
+details.optional-checks > summary { cursor: pointer; font-weight: bold; color: #233a3d; }
+details.optional-checks[open] > summary { margin-bottom: 1em; }
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = TRUE,
+  fig.width = 9, fig.height = 4.8, out.width = "100%", collapse = TRUE, comment = "#>")
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(ggplot2)
+theme_set(theme_minimal(base_size = 13))
+options(dplyr.summarise.inform = FALSE)
+if (!exists("params", inherits = FALSE)) {
+  params <- list(data_path = "../.hawaii-ckmr-26/datasets/samp_delfi_S.rda",
+                 helper_path = "../R/tidy-delfi-S.R", check_mark_code = TRUE)
+}
+source(params$helper_path, local = TRUE, encoding = "UTF-8")
+epoch_levels <- c("Through 2015", "After 2015")
+epoch_colors <- c("Through 2015" = "#3C6EA8", "After 2015" = "#B65D43")
+```
+
+# What changes at Sanctuary Sound?
+
+At Acme, exact ages supplied offspring birth years. Here, dolphins are released
+and their ages are treated as uncertain in the kin analysis. A sampled dolphin
+can be the mother of a daughter born **after** its capture, provided it survives
+until that birth. Neither member of a pair is assigned a parent/offspring role
+from its measured length alone.
+
+We follow Mark's `fit_delfi_S.r` through the age-length calibration and category
+counts. Then we expand **one** category over its possible ages. We do not yet
+fit the demographic model or implement the efficient full likelihood.
+
+Preparation remains visible below. Repeated calculations are functions in
+`R/tidy-delfi-S.R`, ordered as we use them. The core analysis needs the same
+packages as the Acme notebook; Mark's packages are used only by the optional
+cross-check at the end.
+
+# Meet the data and supplied growth model
+
+## Choose the data file
+
+Change `data_path` for your copy of Mark's repository. As in the Acme notebook,
+relative paths resolve from the Rmd's folder when knitting. `helper_path` points
+to the companion functions in this CKMRshiny checkout.
+
+```{r load-data}
+data_path <- normalizePath(params$data_path, mustWork = TRUE)
+loaded_data <- new.env(parent = emptyenv())
+loaded_names <- load(data_path, envir = loaded_data)
+stopifnot("samp_delfi_S" %in% loaded_names)
+raw_data <- loaded_data$samp_delfi_S
+rm(loaded_data)
+
+samples <- as_tibble(unclass(raw_data$Samps))
+pairs <- tibble(pair_id = seq_len(nrow(raw_data$POPs)),
+                id_1 = raw_data$POPs[, 1], id_2 = raw_data$POPs[, 2])
+public <- attr(raw_data, "public")
+Amat <- public$Amat
+
+stopifnot(!anyNA(samples$ID), !anyDuplicated(samples$ID),
+          all(pairs$id_1 %in% samples$ID), all(pairs$id_2 %in% samples$ID),
+          all(pairs$id_1 != pairs$id_2))
+# Assert each unordered individual pair occurs only once.
+stopifnot(!anyDuplicated(tibble(first = pmin(pairs$id_1, pairs$id_2),
+                               second = pmax(pairs$id_1, pairs$id_2))))
+
+samples |> slice_head(n = 6) |> knitr::kable(digits = 3)
+tibble(sampled = nrow(samples), recorded_POPs = nrow(pairs),
+       known_ages = sum(!is.na(samples$A)),
+       nonlethal_samples = sum(!samples$LETHAL)) |> knitr::kable()
+```
+
+**The recorded ages are calibration data here.** Mark's comments describe a
+small set of animals that failed to survive release. In the current dataset,
+all 2,530 samples have ages and all are marked non-lethal. His calibration uses
+all available ages, pooling sexes. The subsequent kin analysis ignores each
+individual's recorded age. We will make that separation explicit.
+
+The file records POPs in parent/offspring order. We will use that information
+only to recognize that a pair is related; category counting below forgets the
+orientation and the probability calculation allows either individual to be the
+mother. `secret` simulation attributes are not used.
+
+If `kinsimmer2` is absent, loading may warn that its namespace was replaced by
+`.GlobalEnv`. That concerns stored simulator functions. We use the recorded
+columns and extract four supplied constants; the tidy calculations do not call
+those simulator functions.
+
+## Make the growth parameters visible
+
+The supplied `public$len_fun` is a **quantile** function for length given age.
+Its enclosing environment stores the growth constants. We extract those values
+once into an ordinary list, then pass them explicitly through the calculations.
+They are supplied inputs: we are not estimating them from these samples.
+
+```{r growth-parameters}
+length_function_environment <- environment(public$len_fun)
+growth <- mget(c("vb_Linf", "vb_k", "vb_t0", "vb_cv"),
+               envir = length_function_environment, inherits = FALSE)
+rm(length_function_environment)
+
+tibble(parameter = names(growth), value = unlist(growth, use.names = FALSE)) |>
+  knitr::kable(digits = 6)
+```
+
+Mean length at age is
+
+\[
+\mu_a=L_\infty\{1-\exp[-k(a-t_0)]\}.
+\]
+
+Length given age has a gamma distribution, with shape $1/\mathrm{CV}^2$ and
+scale $\mu_a\mathrm{CV}^2$. Thus its mean is $\mu_a$ and its CV is constant.
+The known-age samples below show why a length is not an exact age measurement,
+especially as growth approaches its asymptote.
+
+```{r growth-and-recorded-ages}
+samples <- samples |>
+  mutate(epoch = factor(if_else(Y <= 2015, epoch_levels[1], epoch_levels[2]),
+                        levels = epoch_levels))
+age_grid <- 1:40                            # Mark's full calibration age support.
+year_grid <- seq.int(min(samples$Y), max(samples$Y))
+growth_curve <- tibble(age = seq(1, 40, length.out = 300)) |>
+  mutate(mean_length = growth$vb_Linf * (1 - exp(-growth$vb_k * (age - growth$vb_t0))))
+
+samples |>
+  filter(!is.na(A)) |>
+  ggplot(aes(A, LENGTH)) +
+  geom_point(aes(color = epoch), alpha = 0.22, size = 1) +
+  geom_line(data = growth_curve, aes(age, mean_length), inherit.aes = FALSE,
+            color = "#263740", linewidth = 1) +
+  scale_color_manual(values = epoch_colors, limits = epoch_levels) +
+  labs(x = "Recorded age (calibration only)", y = "Length", color = "Sampling epoch",
+       caption = "Dark curve: supplied mean length at age. Points: known-age calibration samples of both sexes.")
+```
+
+# From continuous lengths to length bins
+
+Mark chooses length boundaries from 1.50 to 2.00, spaced by 0.05. We retain
+both open-ended tails: below 1.50 and at least 2.00. The lower boundary belongs
+to the bin on its right. The dashed vertical lines mark these same boundaries
+in every plot with length on the x-axis.
+
+```{r define-length-bins}
+Lbin_cuts <- seq(1.5, 2.0, by = 0.05)
+length_bins <- delfi_s_length_bins(Lbin_cuts)
+samples <- samples |>
+  mutate(bin_id = findInterval(LENGTH, c(-Inf, Lbin_cuts, Inf))) |>
+  left_join(select(length_bins, bin_id, length_bin), by = "bin_id",
+            relationship = "many-to-one")
+stopifnot(!anyNA(samples$bin_id), !anyNA(samples$length_bin))
+length_bins |> knitr::kable(digits = 2)
+
+samples |>
+  ggplot(aes(LENGTH, fill = epoch)) +
+  geom_histogram(binwidth = 0.025, boundary = 1.5, color = "white") +
+  geom_vline(xintercept = Lbin_cuts, linetype = "dashed", color = "grey35", linewidth = .35) +
+  facet_wrap(~epoch, ncol = 1) +
+  scale_fill_manual(values = epoch_colors, limits = epoch_levels) +
+  guides(fill = "none") +
+  labs(x = "Length", y = "Sample count",
+       caption = "Dashed lines: calibration bin boundaries. Both sexes contribute to calibration.")
+```
+
+## Calculate probabilities in the bins
+
+For bin $\ell=[l_\ell,u_\ell)$, integrate the conditional length density:
+
+\[
+g_{\ell a}=P(L_b=\ell\mid A=a)=F_a(u_\ell)-F_a(l_\ell).
+\]
+
+The tail endpoints are $-\infty$ and $+\infty$, giving CDF values zero and one.
+This replaces the dummy tail values used in Mark's script with explicit bounds.
+
+```{r length-given-age-probabilities}
+length_probs <- expand_grid(age = age_grid, bin_id = length_bins$bin_id) |>
+  left_join(length_bins, by = "bin_id", relationship = "many-to-one") |>
+  mutate(mean_length = growth$vb_Linf * (1 - exp(-growth$vb_k * (age - growth$vb_t0))),
+         gamma_shape = 1 / growth$vb_cv^2,
+         gamma_scale = mean_length / gamma_shape,
+         lower_cdf = pgamma(lower, shape = gamma_shape, scale = gamma_scale),
+         upper_cdf = pgamma(upper, shape = gamma_shape, scale = gamma_scale),
+         p_length_given_age = upper_cdf - lower_cdf)
+
+length_probability_checks <- length_probs |>
+  summarise(total = sum(p_length_given_age), .by = age)
+stopifnot(all(length_probs$p_length_given_age >= 0),
+          max(abs(length_probability_checks$total - 1)) < 1e-12)
+
+length_probs |>
+  filter(age %in% c(2, 5, 15, 40)) |>
+  select(age, length_bin, p_length_given_age) |>
+  pivot_wider(names_from = age, values_from = p_length_given_age, names_prefix = "age_") |>
+  knitr::kable(digits = 4)
+```
+
+First look at continuous densities. Then compare the probability masses in the
+bins. Their heights represent **probability per bin**, not a density; the tail
+bins continue beyond the displayed length range.
+
+```{r continuous-length-densities}
+illustrated_ages <- c(2, 5, 15, 40)
+length_limits <- range(c(samples$LENGTH, Lbin_cuts)) + c(-0.05, 0.05)
+# Show almost all of the model densities, even beyond the selected sample's
+# observed lengths. The binned plots below explicitly clip only their tails.
+density_limits <- qgamma(c(0.001, 0.999), shape = 1 / growth$vb_cv^2,
+                        scale = range(length_probs$mean_length) * growth$vb_cv^2)
+length_densities <- expand_grid(age = illustrated_ages,
+                               length = seq(density_limits[1], density_limits[2], length.out = 600)) |>
+  mutate(mean_length = growth$vb_Linf * (1 - exp(-growth$vb_k * (age - growth$vb_t0))),
+         density = dgamma(length, shape = 1 / growth$vb_cv^2,
+                          scale = mean_length * growth$vb_cv^2))
+length_densities |>
+  ggplot(aes(length, density, color = factor(age))) +
+  geom_line(linewidth = 0.9) +
+  geom_vline(xintercept = Lbin_cuts, linetype = "dashed", color = "grey55", linewidth = .3) +
+  scale_color_viridis_d(end = .85) +
+  labs(x = "Length", y = "Density", color = "Age",
+       caption = "These are P(length | age) densities, before using any age prior.")
+```
+
+```{r binned-length-probabilities, fig.height=5.5}
+length_probs |>
+  filter(age %in% illustrated_ages) |>
+  ggplot() +
+  geom_rect(aes(xmin = pmax(lower, length_limits[1]), xmax = pmin(upper, length_limits[2]),
+                ymin = 0, ymax = p_length_given_age, fill = factor(age)), color = "white") +
+  geom_vline(xintercept = Lbin_cuts, linetype = "dashed", color = "grey45", linewidth = .3) +
+  facet_wrap(~age, ncol = 2, labeller = label_both) +
+  scale_fill_viridis_d(end = .85) +
+  coord_cartesian(xlim = length_limits) +
+  guides(fill = "none") +
+  labs(x = "Length bin (outer bins extend beyond this view)", y = "Probability in bin")
+```
+
+The full table can also be viewed as a heat map. At a fixed age, probabilities
+sum to one across length bins. At a fixed length bin, they generally do **not**
+sum to one across ages: that requires Bayes' rule.
+
+```{r forward-probability-heatmap, fig.height=5.5}
+length_probs |>
+  ggplot() +
+  geom_rect(aes(xmin = pmax(lower, length_limits[1]), xmax = pmin(upper, length_limits[2]),
+                ymin = age - .5, ymax = age + .5, fill = p_length_given_age)) +
+  geom_vline(xintercept = Lbin_cuts, color = "white", linewidth = .25) +
+  scale_fill_viridis_c(name = "P(bin | age)") +
+  coord_cartesian(xlim = length_limits) +
+  labs(x = "Length bin", y = "Age",
+       caption = "Each horizontal age slice sums to one across bins. Tail bins are clipped only for display.")
+```
+
+# Calibrate age given length, separately for two epochs
+
+## An age prior and Bayes' rule
+
+Let $d_e>0$ be the decline parameter for epoch $e$. Mark assumes
+
+\[
+\pi_e(a)=\frac{\exp(-d_e a)}{\sum_{u=1}^{40}\exp(-d_e u)},\qquad
+P(A=a\mid L_b=\ell,e)=
+\frac{g_{\ell a}\pi_e(a)}{\sum_u g_{\ell u}\pi_e(u)}.
+\]
+
+The helper `delfi_s_age_key()` implements those multiplications and normalizations
+as joins and grouped operations. It takes `log_decline` so that $d_e$ is positive.
+
+For a provisional $d=0.2$, inspect what goes into one bin's posterior:
+
+```{r inspect-bayes-calculation}
+provisional_key <- delfi_s_age_key(log(0.2), length_probs)
+provisional_key |>
+  filter(bin_id == 6, age <= 10) |>
+  select(length_bin, age, p_length_given_age, p_age, joint_probability,
+         p_length_bin, p_age_given_length) |>
+  knitr::kable(digits = 6)
+```
+
+`p_length_bin` is the same denominator on every row of this bin. Dividing the
+joint probabilities by it makes the age probabilities sum to one.
+
+## Count the known ages and fit the two declines
+
+The calibration likelihood is conditional on the observed length bins. If
+$n_{e,a,\ell}$ counts known-age samples, its parameter-dependent part is
+
+\[
+\ell_e(d_e)=\sum_{a,\ell}n_{e,a,\ell}
+\log P(A=a\mid L_b=\ell,e).
+\]
+
+This is **not** a fit to the length histogram alone. The recorded ages identify
+which age probabilities receive each observed count. As in Mark's script,
+we use all known ages of both sexes before restricting the kin-analysis sample.
+
+```{r count-aged-samples}
+aged_counts <- samples |>
+  filter(!is.na(A)) |>                          # Known ages are used only at this stage.
+  count(epoch, age = A, bin_id, name = "n_aged") |>
+  complete(epoch = epoch_levels, age = age_grid, bin_id = length_bins$bin_id,
+           fill = list(n_aged = 0L))             # Explicit zeros over the calibration grid.
+
+stopifnot(sum(aged_counts$n_aged) == sum(!is.na(samples$A)),
+          all(samples$A[!is.na(samples$A)] %in% age_grid))
+aged_counts |>
+  summarise(known_age_samples = sum(n_aged), .by = epoch) |>
+  knitr::kable()
+```
+
+```{r fit-age-priors}
+age_fits <- setNames(lapply(epoch_levels, function(e) {
+  optimize(
+    f = function(log_decline) delfi_s_calibration_loglik(
+      log_decline, filter(aged_counts, epoch == e), length_probs),
+    interval = log(c(0.01, 0.9)), maximum = TRUE
+  )
+}), epoch_levels)
+
+calibration_fits <- tibble(
+  epoch = factor(epoch_levels, levels = epoch_levels),
+  log_decline = vapply(age_fits, function(f) f$maximum, numeric(1)),
+  decline = exp(log_decline),
+  conditional_log_likelihood = vapply(age_fits, function(f) f$objective, numeric(1))
+)
+calibration_fits |> knitr::kable(digits = 6)
+
+# Recompute each key explicitly at the returned optimum; no environment state
+# from an optimizer's last evaluation is needed.
+age_key <- bind_rows(lapply(seq_len(nrow(calibration_fits)), function(i) {
+  delfi_s_age_key(calibration_fits$log_decline[i], length_probs) |>
+    mutate(epoch = calibration_fits$epoch[i], .before = 1)
+}))
+key_checks <- age_key |>
+  summarise(total = sum(p_age_given_length), .by = c(epoch, bin_id))
+stopifnot(max(abs(key_checks$total - 1)) < 1e-12)
+```
+
+## What changed between the epochs?
+
+These are the fitted **age priors**. The later epoch has a shallower decline,
+placing more prior probability on older ages. This changes the reverse
+age-length key even though the forward length-at-age model is unchanged.
+
+```{r fitted-age-priors}
+bind_rows(lapply(seq_len(nrow(calibration_fits)), function(i) {
+  delfi_s_age_prior(calibration_fits$log_decline[i], age_grid) |>
+    mutate(epoch = calibration_fits$epoch[i])
+})) |>
+  ggplot(aes(age, p_age, color = epoch)) +
+  geom_line(linewidth = 1) +
+  scale_color_manual(values = epoch_colors, limits = epoch_levels) +
+  labs(x = "Age", y = "Prior probability", color = "Sampling epoch")
+```
+
+Now fix a length bin. Each vertical column below is an age distribution and
+sums to one. Compare this with the forward-probability heat map above.
+
+```{r posterior-age-heatmaps, fig.height=5.5}
+age_key |>
+  ggplot() +
+  geom_rect(aes(xmin = pmax(lower, length_limits[1]), xmax = pmin(upper, length_limits[2]),
+                ymin = age - .5, ymax = age + .5, fill = p_age_given_length)) +
+  geom_vline(xintercept = Lbin_cuts, color = "white", linewidth = .25) +
+  facet_wrap(~epoch, nrow = 1) +
+  scale_fill_viridis_c(name = "P(age | bin)") +
+  coord_cartesian(xlim = length_limits) +
+  labs(x = "Length bin", y = "Age",
+       caption = "Each length-bin column sums to one within its epoch. Growth parameters are fixed in both epochs.")
+```
+
+For selected bins, compare the fitted key with the observed conditional age
+frequencies. The two-epoch, one-decline-per-epoch model is an approximation;
+we should inspect what it can and cannot reproduce.
+
+```{r age-key-diagnostics, fig.height=5.5}
+observed_age_frequencies <- aged_counts |>
+  group_by(epoch, bin_id) |>
+  mutate(observed_probability = if (sum(n_aged) > 0) n_aged / sum(n_aged) else NA_real_) |>
+  ungroup()
+
+age_key |>
+  filter(bin_id %in% c(3, 6, 9, 12)) |>
+  left_join(select(observed_age_frequencies, epoch, bin_id, age, observed_probability),
+            by = c("epoch", "bin_id", "age"), relationship = "one-to-one") |>
+  mutate(length_bin = factor(length_bin, levels = length_bins$length_bin)) |>
+  ggplot(aes(age, p_age_given_length, color = epoch)) +
+  geom_line(linewidth = .9) +
+  geom_point(aes(y = observed_probability), alpha = .5, size = 1, na.rm = TRUE) +
+  facet_wrap(~length_bin, ncol = 2) +
+  scale_color_manual(values = epoch_colors, limits = epoch_levels) +
+  labs(x = "Age", y = "Conditional probability", color = "Sampling epoch",
+       caption = "Lines: fitted P(age | bin, epoch). Points: observed age frequencies within that bin and epoch.")
+```
+
+## Why is this decline not the survival estimate?
+
+Survival helps shape an age distribution, but recruitment history, population
+change, and sampling also matter. Under a simple equilibrium with constant
+recruitment and constant annual survival $s$, an exponential age decline would
+have $d=-\log s$. Mark does **not** impose that relationship here.
+
+Instead, the two declines calibrate age probabilities first. The later kin
+model has its own survival parameter, informed by possible births after a
+mother's capture. It takes the fitted age keys as fixed, so uncertainty in
+this calibration is not propagated into that demographic fit. The two-stage
+approximation is part of the model, not a consequence of using tidy tables.
+
+# Prepare the kin-analysis sample
+
+## Apply the length filter and remove individual ages
+
+We now keep female samples with length at most 1.8, as in Mark's driver. Every
+retained individual is a potential mother **and** a potential daughter; its
+role is not fixed by an age at sampling. Recorded ages are deliberately absent
+from `analysis_samples`.
+
+```{r prepare-analysis-samples}
+Luplim <- 1.8
+Auplim <- 20L
+y0 <- min(year_grid)
+analysis_bins <- length_bins |> filter(lower <= Luplim)
+
+analysis_samples <- samples |>
+  filter(SEX == "FEMALE", LENGTH <= Luplim, Y >= min(year_grid)) |>
+  select(ID, Y, LENGTH, bin_id, length_bin, epoch)  # No recorded age A is passed on.
+
+sample_cells <- analysis_samples |>
+  count(bin_id, Y, name = "n_sampled") |>
+  complete(bin_id = analysis_bins$bin_id, Y = year_grid, fill = list(n_sampled = 0L)) |>
+  arrange(bin_id, Y) |>
+  mutate(cell_id = row_number())                 # Canonical order: length bin, then year.
+
+analysis_samples <- analysis_samples |>
+  left_join(select(sample_cells, bin_id, Y, cell_id),
+            by = c("bin_id", "Y"), relationship = "many-to-one")
+stopifnot(!"A" %in% names(analysis_samples), !anyNA(analysis_samples$cell_id))
+
+tibble(retained_females = nrow(analysis_samples),
+       occupied_length_year_cells = sum(sample_cells$n_sampled > 0),
+       years = length(year_grid)) |> knitr::kable()
+```
+
+The uppermost retained bin begins at 1.8; it is empty unless an observed length
+is exactly that endpoint. Keeping it makes Mark's indexing convention explicit.
+Its original calibration probabilities are not merged into the preceding bin.
+The inclusion rule for observed samples is still `LENGTH <= 1.8`.
+
+## Build the working age key, including the age-cap approximation
+
+Mark reduces the working age support to 1--20 to speed the kin calculation.
+He **lumps all probability at ages 20--40 into the age-20 cell**. This is not
+truncation followed by renormalization. The last cell means **20+**, although
+subsequent birth-year and survival calculations treat it numerically as age 20.
+We retain that approximation and make its tail mass visible.
+
+```{r working-age-key}
+age_tail_audit <- age_key |>
+  filter(bin_id %in% analysis_bins$bin_id) |>
+  summarise(probability_age_20_plus = sum(p_age_given_length[age >= Auplim]),
+            .by = c(epoch, bin_id, length_bin))
+age_tail_audit |> knitr::kable(digits = 6)
+
+working_age_key <- age_key |>
+  filter(bin_id %in% analysis_bins$bin_id) |>
+  mutate(age = pmin(age, Auplim)) |>                # Combine older ages in the final cell.
+  summarise(p_age_given_length = sum(p_age_given_length), .by = c(epoch, bin_id, age))
+
+age_key_by_year <- expand_grid(year = year_grid, bin_id = analysis_bins$bin_id,
+                              age = seq_len(Auplim)) |>
+  mutate(epoch = if_else(year <= 2015, epoch_levels[1], epoch_levels[2])) |>
+  left_join(working_age_key, by = c("epoch", "bin_id", "age"), relationship = "many-to-one")
+
+working_key_checks <- age_key_by_year |>
+  summarise(total = sum(p_age_given_length), .by = c(year, bin_id))
+stopifnot(!anyNA(age_key_by_year), max(abs(working_key_checks$total - 1)) < 1e-12)
+
+age_key_by_year |>
+  filter(year %in% c(2015, 2016), bin_id == 6) |>
+  mutate(age_label = if_else(age == Auplim, paste0(Auplim, "+"), as.character(age))) |>
+  select(year, epoch, length_bin = bin_id, age_label, p_age_given_length) |>
+  knitr::kable(digits = 6)
+```
+
+`age_key_by_year` is the explicit lookup table that will connect the covariates
+of each comparison to its possible ages. It contains probabilities, not a
+point estimate of age for each dolphin.
+
+# Compile the tidy comparison categories
+
+## Count each unordered comparison once
+
+A category is a pair of observed length/year cells. If the cells differ, there
+are $n_1n_2$ comparisons. Within one cell of size $n$, there are
+$\binom{n}{2}=n(n-1)/2$ comparisons between distinct individuals. We retain only
+`cell_1 <= cell_2` to avoid counting both orientations.
+
+Mark instead uses $n^2/2$ for same-cell exposure, a large-sample approximation.
+We keep **both columns**, naming the exact one `n_comp` and the Mark-compatible
+one `n_comp_mark`. This is bookkeeping about comparisons; it does not remove
+either possible biological direction of a POP.
+
+```{r count-comparisons}
+comparison_grid <- expand_grid(cell_1 = sample_cells$cell_id, cell_2 = sample_cells$cell_id) |>
+  filter(cell_1 <= cell_2) |>
+  left_join(transmute(sample_cells, cell_1 = cell_id, L1 = bin_id, Y1 = Y, n1 = n_sampled),
+            by = "cell_1", relationship = "many-to-one") |>
+  left_join(transmute(sample_cells, cell_2 = cell_id, L2 = bin_id, Y2 = Y, n2 = n_sampled),
+            by = "cell_2", relationship = "many-to-one") |>
+  mutate(same_cell = cell_1 == cell_2,
+         n_comp = if_else(same_cell, as.double(n1) * (n1 - 1) / 2, as.double(n1) * n2),
+         n_comp_mark = if_else(same_cell, as.double(n1)^2 / 2, as.double(n1) * n2))
+
+stopifnot(sum(comparison_grid$n_comp) == choose(nrow(analysis_samples), 2),
+          sum(comparison_grid$n_comp_mark) == nrow(analysis_samples)^2 / 2)
+
+comparison_grid |>
+  summarise(exact_comparisons = sum(n_comp), Mark_approximation = sum(n_comp_mark),
+            difference = sum(n_comp_mark - n_comp)) |>
+  knitr::kable()
+```
+
+The approximation adds half the number of sampled individuals to the total
+exposure. We will not silently substitute one convention for the other in a
+later likelihood comparison.
+
+## Assign identified pairs to the same categories
+
+Both pair endpoints must survive the sample filter. We look up their observed
+cells using IDs, then sort the two cell numbers. The original mother/daughter
+order and recorded ages play no role in this categorization.
+
+```{r count-observed-pairs}
+analysis_pairs <- pairs |>
+  inner_join(select(analysis_samples, id_1 = ID, cell_a = cell_id),
+             by = "id_1", relationship = "many-to-one") |>
+  inner_join(select(analysis_samples, id_2 = ID, cell_b = cell_id),
+             by = "id_2", relationship = "many-to-one") |>
+  mutate(cell_1 = pmin(cell_a, cell_b), cell_2 = pmax(cell_a, cell_b))
+
+match_counts <- analysis_pairs |>
+  count(cell_1, cell_2, name = "n_MOP")
+stopifnot(nrow(anti_join(match_counts, filter(comparison_grid, n_comp > 0),
+                        by = c("cell_1", "cell_2"))) == 0)
+
+# Keep zero-match categories; drop only categories with no comparisons.
+categories <- comparison_grid |>
+  filter(n_comp > 0) |>
+  left_join(match_counts, by = c("cell_1", "cell_2"), relationship = "one-to-one") |>
+  replace_na(list(n_MOP = 0L)) |>
+  left_join(select(length_bins, L1 = bin_id, length_bin_1 = length_bin),
+            by = "L1", relationship = "many-to-one") |>
+  left_join(select(length_bins, L2 = bin_id, length_bin_2 = length_bin),
+            by = "L2", relationship = "many-to-one") |>
+  mutate(epoch_1 = if_else(Y1 <= 2015, epoch_levels[1], epoch_levels[2]),
+         epoch_2 = if_else(Y2 <= 2015, epoch_levels[1], epoch_levels[2])) |>
+  arrange(cell_1, cell_2)
+
+stopifnot(sum(categories$n_MOP) == nrow(analysis_pairs),
+          all(categories$n_MOP <= categories$n_comp), !anyNA(categories))
+
+categories |>
+  summarise(categories = n(), comparisons = sum(n_comp), observed_MOPs = sum(n_MOP),
+            zero_match_categories = sum(n_MOP == 0)) |> knitr::kable()
+
+categories |>
+  select(length_bin_1, Y1, epoch_1, length_bin_2, Y2, epoch_2, n1, n2, n_comp, n_comp_mark, n_MOP) |>
+  slice_head(n = 12) |>
+  knitr::kable(caption = "Observed-covariate category table; L1 and L2 in the code are integer bin IDs")
+```
+
+A year-by-year summary makes the coverage of the comparison design visible.
+The canonical order is by length bin and then year, so cell 1 need not have
+been sampled before cell 2. The figure keeps that order; it is not a temporal
+parent/offspring assignment.
+
+```{r comparison-heatmap, fig.height=5.5}
+categories |>
+  summarise(comparisons = sum(n_comp), matches = sum(n_MOP), .by = c(Y1, Y2)) |>
+  ggplot(aes(Y1, Y2, fill = comparisons / 1000)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = matches), size = 2.7) +
+  scale_fill_gradient(low = "#edf3f8", high = "#3C6EA8") +
+  scale_x_continuous(breaks = year_grid) +
+  scale_y_continuous(breaks = year_grid) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5)) +
+  labs(x = "Sampling year of cell 1", y = "Sampling year of cell 2", fill = "Comparisons\n(thousands)",
+       caption = "Fill: exact comparison counts, summed over length bins. Numbers: observed MOPs.")
+```
+
+# Work through one category's uncertain ages
+
+The demographic model will have three parameters: log abundance at $y_0$,
+exponential growth rate, and annual survival. Here we choose **illustrative
+values**, not fitted estimates. We pick one observed off-diagonal category for
+inspection; the full category table still retains all zero-match rows.
+
+```{r choose-example-category}
+example_category <- categories |>
+  filter(n_MOP > 0, !same_cell) |>
+  mutate(illustration_priority = Y2 - Y1 >= 6 & Y2 - Y1 <= 10) |>
+  arrange(desc(illustration_priority), desc(n_MOP), L1, Y1, L2, Y2) |>
+  slice_head(n = 1) |>
+  select(-illustration_priority)
+example_parameters <- list(log_N0 = log(5000), growth_rate = 0.01,
+                           annual_survival = 0.8, y0 = y0, maturity_age = Amat)
+example_category |>
+  select(length_bin_1, Y1, length_bin_2, Y2, n_comp, n_MOP) |>
+  knitr::kable()
+tibble(parameter = names(example_parameters), value = unlist(example_parameters)) |>
+  knitr::kable(digits = 4)
+```
+
+For possible ages $a_1,a_2$, birth years are $b_1=y_1-a_1$ and $b_2=y_2-a_2$.
+If individual 2 is the mother of individual 1, the conditional probability is
+
+\[
+q_{2\to1}(a_1,a_2)=
+\mathbf{1}\{b_1\ge b_2+A_{\mathrm{mat}}\}
+\frac{s^{\max(0,b_1-y_2)}}{N_{b_1}}.
+\]
+
+The indicator requires maturity at the daughter's birth. If that birth is
+no later than the mother's capture, we already know she survived to it. If
+it is later, survival from capture to birth contributes the power of $s$.
+The reverse direction exchanges 1 and 2. At any fixed pair of true ages,
+both directions cannot hold simultaneously.
+
+Let $w_i(a_i)=P(A_i=a_i\mid L_i,y_i)$ be the conditional age weights for
+individual $i$, distinct from the marginal age prior $\pi_e(a)$. The mixed
+probability is
+
+\[
+p_c=\sum_{a_1=1}^{20}\sum_{a_2=1}^{20}
+w_1(a_1)w_2(a_2)
+\{q_{2\to1}(a_1,a_2)+q_{1\to2}(a_1,a_2)\}.
+\]
+
+The helper expands those **400 terms** into a tibble. Open its definition in
+`R/tidy-delfi-S.R`: both directions and their survival exponents are explicit.
+
+Here is how the equation maps to its columns. Sampling years are fixed by the
+chosen category; ages and implied birth years vary across the 400 rows.
+
+| Column | Term in the equation |
+|:--|:--|
+| `age_1`, `age_2` | $a_1,a_2$, the possible ages at capture |
+| `sampling_year_1`, `sampling_year_2` | $y_1,y_2$, the observed capture years |
+| `birth_1`, `birth_2` | $b_1=y_1-a_1$, $b_2=y_2-a_2$ |
+| `p_age_1`, `p_age_2` | $w_1(a_1),w_2(a_2)$ |
+| `joint_age_probability` | $w_1(a_1)w_2(a_2)$ |
+| `mature_2_at_birth_1` | $\mathbf{1}\{b_1\ge b_2+A_{\mathrm{mat}}\}$ |
+| `future_years_2_to_1` | $\max(0,b_1-y_2)$ |
+| `N_at_birth_1` | $N_{b_1}$ |
+| `p_2_mother_of_1` | $q_{2\to1}(a_1,a_2)$ |
+| `contribution_2_to_1` | $w_1(a_1)w_2(a_2)q_{2\to1}(a_1,a_2)$ |
+| `contribution` | $w_1(a_1)w_2(a_2)\{q_{2\to1}+q_{1\to2}\}$, one complete summand |
+
+In particular, `future_years_2_to_1` counts the years **after individual 2's
+capture until individual 1's birth**, or zero if that birth preceded capture.
+Remember that $y_2=b_2+a_2$. The reverse-direction columns exchange 1 and 2;
+thus `future_years_1_to_2` is $\max(0,b_2-y_1)$, with $y_1=b_1+a_1$.
+
+Thus `contribution_2_to_1` is the entire weighted term for individual 2 being
+the mother, not just its survival factor:
+
+\[
+w_1(a_1)w_2(a_2)q_{2\to1}(a_1,a_2)
+=w_1(a_1)w_2(a_2)
+\mathbf{1}\{b_1\ge b_2+A_{\mathrm{mat}}\}
+\frac{s^{\max(0,b_1-y_2)}}{N_{b_1}}.
+\]
+
+The table below displays selected columns; the full tibble also contains the
+individual age weights, maturity indicators, abundances, and conditional
+probabilities listed above.
+
+```{r expand-example-ages}
+age_pairs <- do.call(delfi_s_age_pair_example,
+  c(list(category = example_category, age_key_by_year = age_key_by_year), example_parameters))
+example_probability <- sum(age_pairs$contribution)
+stopifnot(nrow(age_pairs) == Auplim^2,
+          abs(sum(age_pairs$joint_age_probability) - 1) < 1e-12,
+          !any(age_pairs$mature_2_at_birth_1 & age_pairs$mature_1_at_birth_2),
+          is.finite(example_probability), example_probability > 0)
+
+age_pairs |>
+  arrange(desc(contribution)) |>
+  select(age_1, age_2, sampling_year_1, sampling_year_2, birth_1, birth_2, joint_age_probability,
+         future_years_2_to_1, future_years_1_to_2,
+         contribution_2_to_1, contribution_1_to_2) |>
+  slice_head(n = 10) |>
+  knitr::kable(digits = 8, caption = "The ten largest age-pair contributions at the illustrative parameters")
+```
+
+```{r one-age-row, include=FALSE}
+worked_age_row <- age_pairs |>
+  slice_max(contribution_1_to_2, n = 1, with_ties = FALSE)
+```
+
+To read one row numerically, consider the largest `contribution_1_to_2`.
+Individual 1 was sampled in `r worked_age_row$sampling_year_1`; at possible
+age `r worked_age_row$age_1`, its birth year is `r worked_age_row$birth_1`.
+Individual 2 was sampled in `r worked_age_row$sampling_year_2`; at possible
+age `r worked_age_row$age_2`, its birth year is `r worked_age_row$birth_2`.
+For individual 1 to be the mother, she must survive from her capture in
+`r worked_age_row$sampling_year_1` until the daughter's birth in
+`r worked_age_row$birth_2`. Thus `future_years_1_to_2` is
+$\max(0,\,`r worked_age_row$birth_2`-`r worked_age_row$sampling_year_1`)=`r worked_age_row$future_years_1_to_2`$,
+and the survival factor is
+$`r example_parameters$annual_survival`^{`r worked_age_row$future_years_1_to_2`}$.
+Multiplying this by the maturity indicator, dividing by `N_at_birth_2`, and
+multiplying by `joint_age_probability` gives `contribution_1_to_2`.
+Summing both directional contributions over all rows gives $p_c$.
+
+In the next figure, the first panel is the age-mixture weight alone. The other
+panels show each direction's contribution to the total POP probability.
+Impossible age combinations have zero contribution. Filled circles mark the
+largest contributing age pair in each relationship direction. Dashed boundaries
+separate combinations requiring survival beyond capture from those that do not.
+
+```{r age-pair-heatmaps, fig.height=4}
+age_pair_plot_data <- age_pairs |>
+  transmute(age_1, age_2,
+    `Age-mixture weight` = joint_age_probability,
+    `Individual 2 is mother of 1` = contribution_2_to_1 / example_probability,
+    `Individual 1 is mother of 2` = contribution_1_to_2 / example_probability) |>
+  pivot_longer(-c(age_1, age_2), names_to = "panel", values_to = "probability") |>
+  mutate(panel = factor(panel, levels = c("Age-mixture weight",
+    "Individual 2 is mother of 1", "Individual 1 is mother of 2")))
+
+largest_contributions <- age_pair_plot_data |>
+  filter(panel != "Age-mixture weight") |>
+  slice_max(probability, n = 1, with_ties = FALSE, by = panel) |>
+  filter(probability > 0)
+
+survival_boundaries <- tibble(
+  panel = factor(c("Individual 2 is mother of 1", "Individual 1 is mother of 2"),
+    levels = levels(age_pair_plot_data$panel)),
+  boundary = c(example_category$Y1 - example_category$Y2,
+               example_category$Y2 - example_category$Y1) - 0.5
+)
+
+panel_labels <- c(
+  "Age-mixture weight" = "Age-mixture weight\n(all possible ages)",
+  "Individual 2 is mother of 1" = paste0("Individual 2 is mother of 1\n",
+    sprintf("%.1f%% of the POP probability", 100 * sum(age_pairs$contribution_2_to_1) / example_probability)),
+  "Individual 1 is mother of 2" = paste0("Individual 1 is mother of 2\n",
+    sprintf("%.1f%% of the POP probability", 100 * sum(age_pairs$contribution_1_to_2) / example_probability))
+)
+
+age_pair_plot_data |>
+  ggplot(aes(age_1, age_2, fill = probability)) +
+  geom_tile() +
+  geom_vline(data = filter(survival_boundaries, panel == "Individual 2 is mother of 1", boundary > 0),
+             aes(xintercept = boundary), inherit.aes = FALSE, linetype = "dashed", color = "white") +
+  geom_hline(data = filter(survival_boundaries, panel == "Individual 1 is mother of 2", boundary > 0),
+             aes(yintercept = boundary), inherit.aes = FALSE, linetype = "dashed", color = "white") +
+  geom_point(data = largest_contributions, aes(age_1, age_2), inherit.aes = FALSE,
+             shape = 21, fill = "white", color = "black", size = 2) +
+  facet_wrap(~panel, nrow = 1, labeller = as_labeller(panel_labels)) +
+  scale_fill_viridis_c(name = "Probability\nweight", transform = "sqrt") +
+  scale_x_continuous(breaks = c(1, 5, 10, 15, 20), labels = c("1", "5", "10", "15", "20+")) +
+  scale_y_continuous(breaks = c(1, 5, 10, 15, 20), labels = c("1", "5", "10", "15", "20+")) +
+  coord_equal() +
+  labs(x = "Possible age of individual 1 at capture", y = "Possible age of individual 2 at capture",
+       caption = paste("Age-mixture panel sums to 1; the two contribution panels sum to 1 jointly.",
+         "Square-root color scale makes small contributions more visible.", sep = "\n"))
+```
+
+The same calculation supplies this row's expected match count. This is one
+row's Poisson contribution at the example parameters, **not a fitted model**.
+
+```{r example-row-result}
+example_result <- example_category |>
+  transmute(length_bin_1, Y1, length_bin_2, Y2, n_comp, n_MOP,
+            p_MOP = example_probability,
+            expected_MOP = n_comp * p_MOP,
+            loglik_piece = dpois(n_MOP, expected_MOP, log = TRUE))
+example_result |> knitr::kable(digits = 8)
+
+age_pairs |>
+  summarise(probability_2_mother_of_1 = sum(contribution_2_to_1),
+            probability_1_mother_of_2 = sum(contribution_1_to_2),
+            fraction_requiring_postcapture_survival =
+              (sum(contribution_2_to_1[future_years_2_to_1 > 0]) +
+               sum(contribution_1_to_2[future_years_1_to_2 > 0])) / example_probability) |>
+  knitr::kable(digits = 8)
+```
+
+# What is ready for the likelihood?
+
+We now have two explicit inputs:
+
+* `categories`: observed length/year categories, comparison exposure, and MOP
+  counts, including the zero-match categories.
+* `age_key_by_year`: the calibrated probability distribution over working ages
+  for each observed length/year cell.
+
+The demographic parameters will change the abundance and survival factors.
+The age-mixture probabilities and maturity conditions can be prepared in advance.
+The next stage will turn the one-row reference calculation into an efficient
+full objective and compare it with Mark's implementation.
+
+<details class="optional-checks">
+<summary>Optional checks: compare calibration and category counts with Mark's functions</summary>
+
+These checks use the chosen dataset's `r-scripts/ckmr_funs.r`; they do not run
+the interactive driver. Set `check_mark_code: false` to skip execution. The tidy
+preparation above does not require Mark's packages.
+
+```{r compare-with-mark, message=FALSE}
+mark_repo <- dirname(dirname(data_path))
+mark_functions <- file.path(mark_repo, "r-scripts", "ckmr_funs.r")
+mark_packages <- c("mvbutils", "offarray", "atease", "kinsimmer2")
+can_check <- isTRUE(params$check_mark_code) && file.exists(mark_functions) &&
+  all(vapply(mark_packages, requireNamespace, logical(1), quietly = TRUE))
+
+if (can_check) {
+  library(mvbutils)
+  library(offarray)
+  library(atease)
+  library(kinsimmer2)
+  mark_code <- new.env(parent = globalenv())
+  sys.source(mark_functions, envir = mark_code)
+  mark_labels <- levels(mvbutils::mcut(2, Lbin_cuts))
+  mark_forward <- offarray(0, dimseq = list(Lb = mark_labels, A = age_grid))
+  mark_forward[] <- length_probs |>
+    arrange(age, bin_id) |>
+    pull(p_length_given_age)
+  mark_key_by_year <- offarray(0, dimseq = list(A = age_grid, Lb = mark_labels, Y = year_grid))
+
+  calibration_comparison <- bind_rows(lapply(seq_len(nrow(calibration_fits)), function(i) {
+    e <- calibration_fits$epoch[i]
+    n <- filter(aged_counts, epoch == e) |> arrange(bin_id, age) |> pull(n_aged)
+    counts <- offarray(0, dimseq = list(A = age_grid, Lb = mark_labels))
+    counts[] <- n
+    mark_env <- list2env(list(Pr_Lb_A = mark_forward, nA_Lb = counts,
+      AGES = age_grid, Lbins = mark_labels, Pr_A = -1, Pr_A_Lb = -1), parent = mark_code)
+    mark_alk <- mark_code$ALK_delfi_S
+    environment(mark_alk) <- mark_env
+    mark_ll <- mark_alk(calibration_fits$log_decline[i])
+    tidy_key <- age_key |>
+      filter(epoch == e) |> arrange(bin_id, age) |> pull(p_age_given_length)
+    tibble(epoch = e,
+      loglik_difference = mark_ll - calibration_fits$conditional_log_likelihood[i],
+      max_age_probability_difference = max(abs(as.numeric(mark_env$Pr_A_Lb) - tidy_key)))
+  }))
+  stopifnot(max(abs(calibration_comparison$loglik_difference)) < 1e-7,
+            max(calibration_comparison$max_age_probability_difference) < 1e-10)
+  knitr::kable(calibration_comparison, digits = 10)
+
+  # Populate this adapter explicitly, outside the per-epoch checking function.
+  # Each matrix has age in rows and length bin in columns.
+  for (year in year_grid) {
+    e <- if (year <= 2015) epoch_levels[1] else epoch_levels[2]
+    probabilities <- age_key |> filter(epoch == e) |>
+      arrange(bin_id, age) |> pull(p_age_given_length)
+    mark_key_by_year[, , year] <- matrix(probabilities, nrow = length(age_grid))
+  }
+
+  mark_prepared <- mark_code$boring_data_prep_delfi_S(raw_data,
+    Pr_A_LY = mark_key_by_year, Lbin_cuts = Lbin_cuts, Luplim = Luplim, Auplim = Auplim,
+    prev_env = mark_code)
+  mark_categories <- mark_code$boring_dfize(mark_prepared$n_MOP_LY1LY2,
+                                          mark_prepared$n_comp_MOP_LY1LY2) |>
+    as_tibble() |>
+    transmute(L1 = match(as.character(L1), mark_prepared$Lbins), Y1,
+              L2 = match(as.character(L2), mark_prepared$Lbins), Y2,
+              n_comp_mark = n_comp_MOP, n_MOP) |>
+    arrange(L1, Y1, L2, Y2)
+  tidy_mark_categories <- comparison_grid |>
+    filter(n_comp_mark > 0) |>
+    left_join(match_counts, by = c("cell_1", "cell_2"), relationship = "one-to-one") |>
+    replace_na(list(n_MOP = 0L)) |>
+    select(L1, Y1, L2, Y2, n_comp_mark, n_MOP) |>
+    arrange(L1, Y1, L2, Y2)
+  stopifnot(isTRUE(all.equal(as.data.frame(mark_categories), as.data.frame(tidy_mark_categories),
+                            check.attributes = FALSE)))
+  tibble(check = c("Calibration likelihoods and age probabilities", "Mark-compatible category counts"),
+         result = "Agree") |> knitr::kable()
+
+  # Check all 400 worked-example terms against Mark's directed age mixture.
+  mark_loglik <- mark_code$generic_lglk_MOP_livel_mammal
+  mark_prepared$B_range <- seq.int(min(year_grid) - Auplim, max(year_grid) - 1)
+  environment(mark_loglik) <- mark_prepared
+  mark_loglik(c(example_parameters$log_N0, example_parameters$growth_rate,
+                qlogis(example_parameters$annual_survival)))
+  row <- example_category
+  mark_probability <- mark_prepared$Pr_MOP_LY1LY2[
+    mark_prepared$Lbins[row$L1], row$Y1, mark_prepared$Lbins[row$L2], row$Y2]
+  stopifnot(abs(as.numeric(mark_probability) - example_probability) < 1e-12)
+  tibble(tidy_example_probability = example_probability,
+         Mark_example_probability = as.numeric(mark_probability)) |>
+    knitr::kable(digits = 10)
+} else {
+  cat("Mark-code checks skipped. They require check_mark_code = TRUE, the function file,\n",
+      "and packages: ", paste(mark_packages, collapse = ", "), ".\n", sep = "")
+}
+```
+
+There is an additional same-cell convention to resolve before fitting the full
+model: Mark halves the sum of the two directed probabilities when both members
+have the same observed length/year category. Same-cell exposure already has a
+half-factor. For exact unordered pairs of distinct individuals, the two possible
+mother/daughter directions are mutually exclusive and their probabilities add.
+Our worked example deliberately uses different cells, where this issue does
+not arise and both calculations agree. The exact and Mark-compatible exposure
+columns above keep the bookkeeping differences visible for the next stage.
+
+</details>
+
+```{r session-information}
+sessionInfo()
+```
