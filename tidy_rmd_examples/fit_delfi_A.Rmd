@@ -73,11 +73,14 @@ This notebook follows the Acme Archipelago example in Mark Bravington's
 course repository. We use his female-only comparison design and Poisson
 pseudo-likelihood: potential parents are mature at sampling, and potential
 offspring are born in or after a chosen year, even if sampled as adults.
-We expose the calculations through ordinary data frames of individual records,
-comparison categories, and predictions.
+We do the calculations through an ordinary tibble of individual records,
+comparison categories, and predictions. This might make it easier to follow
+the calculations for people that are comfortable in the tidyverse.  (But do note
+that later models that rely heavily on matrix multiplication may not simplify
+so easily to the tidyverse.)
 
 We leave the preparation steps expanded so you can run each chunk and inspect
-its output. Sections 2 to 4 are casual stroll through the "boring data prep" part
+its output. Sections 2 to 4 are a casual stroll through the "boring data prep" part
 of the CKMR estimate.  Mark's version of the same includes some self-described
 "esoteRica."  This version is done using tidyverse tools.  It involves a few more
 lines of code than Mark's nice, lean solution, but this might be more
@@ -189,7 +192,7 @@ individuals by these IDs, not by their row positions.
 
 `Samps` has Mark's `litewt_df` class: underneath it is a list of equal-length
 columns. `unclass()` removes that wrapper, and `as_tibble()` makes an ordinary
-tibble without needing the package that defines the `litewt_df` wrapper.
+tibble without needing the 'kinsimmer2' package that defines the `litewt_df` wrapper.
 
 ```{r permanent-indices}
 samples <- as_tibble(unclass(raw_data$Samps)) # Keep the existing individual IDs.
@@ -200,6 +203,8 @@ pairs <- tibble(
   offspring_id = raw_data$POPs[, 2]        # ID of the identified offspring.
 )
 
+# please excuse all the error checking---I have this in here to let me knnow
+# quickly if and when I've accidentally broken something
 stopifnot(!anyNA(samples$ID), !anyDuplicated(samples$ID),
           all(pairs$parent_id %in% samples$ID),
           all(pairs$offspring_id %in% samples$ID),
