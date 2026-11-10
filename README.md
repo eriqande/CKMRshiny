@@ -5,7 +5,13 @@ analysis, see [the tidy R Markdown examples](tidy_rmd_examples/README.md).
 The notebook starts from his original data, keeps preparation visible, and
 checks agreement with the original likelihood when his packages are available.
 
-A teaching app for exploring parent-offspring close-kin mark-recapture. The
+A pair of teaching apps for exploring close-kin mark-recapture. The launch screen
+offers **Parent-offspring (POP)** and **Siblings (HSP)**. The top buttons switch
+directly between them; **Switch app** returns to the chooser. Both apps remain
+in the same session, so their controls and separate saved-trial registries survive
+switching. A browser restart starts a new session.
+
+The parent-offspring app's
 first scenario uses independent random mating, equal expected reproductive
 output, and independent simple random samples of females, males, and offspring.
 The second tab, **Randomly unequal reproduction**, adds independently assigned
@@ -25,6 +31,80 @@ From this repository in R:
 install.packages(c("shiny", "ggplot2", "tibble")) # once, if needed
 shiny::runApp()
 ```
+
+## Sibling experiments
+
+The sibling app follows the same sections 00-04, colors, trial/replicate controls,
+histogram scale toggles, estimate distributions, and sorted interval displays.
+It has four tabs:
+
+1. **Equal reproduction:** sibling comparisons within one randomly mated cohort.
+2. **Lucky litters:** gamma reproductive sampling weights represent unequal
+   contributions to the surviving offspring cohort, compared within one episode.
+3. **Cross-cohort siblings:** the same adults all survive to a second episode,
+   but their gamma sampling weights are independently redrawn. Only offspring
+   from different episodes are compared.
+4. **Persistent size effects:** the same adults grow for one year before episode
+   two, retaining their individual Linf and K. A mean-one lognormal multiplier
+   varies annual growth rate (default CV 0.25). Positive increments cannot shrink
+   fish or overshoot their own Linf. Fecundities are recalculated from new lengths;
+   additional reproductive output CV remains zero. Uncheck growth to compare with
+   fixed adult traits; set growth-rate CV to zero for deterministic von B growth.
+   All adults survive, even if they pass the initial maximum-age cutoff.
+
+Adults are not survey-sampled in these experiments. Each offspring has an
+independently selected mother and father; kin is identified perfectly and the
+simulation distinguishes maternal from paternal sharing. A full sibling pair
+contributes one maternal and one paternal match. The app explicitly notes that
+brood-level single-sire mating would require different treatment.
+
+Within-cohort comparisons number `C = choose(Sk, 2)`; across cohorts they number
+`C = Sk1 * Sk2`. Matches are counted from family sizes, without enumerating all
+comparisons: `choose(k_i, 2)` within a cohort or `k_i1 * k_i2` across cohorts.
+Both naive estimators use `Nhat = C / matches`. The Poisson Wald intervals are
+working approximations; family clustering can affect their coverage. Full-sibling
+counts are also reported separately as a diagnostic.
+
+The sharing probabilities conditional on adult sampling weights are
+`sum(q_i1^2)` within a cohort and `sum(q_i1 * q_i2)` across cohorts. Independent
+seasonal luck restores the latter's mean to `1/N`; persistent size differences
+remain. Population effective numbers are calculated from **realized population
+offspring counts**, including cross-cohort `1 / sum(k_i1*k_i2/(Nk1*Nk2))`.
+These realized reciprocals can exceed census abundance.
+
+Cross-cohort plots compare the same adults' ERROs or realized family sizes in
+both episodes, including lengths in the size scenario. The population trait
+figures can show either episode. Size-based diagnostic histograms use episode-one
+traits and show population adults, parents represented per sampled offspring,
+and parents represented per sibling match. Their dashed expectations use the
+sample-size-weighted mixture of episode ERROs and the product ERRO1 * ERRO2,
+respectively (the latter reduces to ERRO squared without growth). Relative ERRO
+can decrease even when a fish grows, because it is normalized within sex and episode.
+Parent traits and zero-family
+histograms are diagnostic simulation truth, not additional survey observations.
+
+Complete offspring samples, family counts, summaries, settings, and seeds are
+retained. Unsampled populations are discarded; `hsp_regenerate_rep()` reconstructs
+them. Both apps share 30 trial slots and a 40-million-sample session budget. A
+sibling replicate's population budget counts the adults once plus offspring from
+all its episodes, up to 10 million individuals. Retained data and temporary memory
+also include summaries and display subsets; individual-count limits are not byte limits.
+
+Sibling functions live in `R/hsp-simulation.R`, `R/hsp-plots.R`, and
+`R/hsp-app.R`, with the chooser in `R/ckmr-app.R`. They reuse the POP adult
+generation, reproduction, RNG isolation, growth controls, estimate summaries,
+and estimation/interval plots. For example:
+
+```r
+source("R/pop-simulation.R")
+source("R/hsp-simulation.R")
+settings <- hsp_settings(scenario = "cross_lucky", female_shape = 0.2)
+trial <- hsp_run_trial(settings, num_reps = 100, seed = 1001)
+hsp_trial_table(list(trial))
+full_rep <- hsp_regenerate_rep(trial$reps[[1]], retain_population = TRUE)
+```
+
+## Parent-offspring experiments
 
 Run a trial, then choose a saved trial and replicate. The population and sampling
 figures show that replicate; pair-count and estimation figures summarize the trial.
@@ -265,6 +345,7 @@ Rscript tests/check-pop.R
 Rscript tests/check-random-reproduction.R
 Rscript tests/check-size-reproduction.R
 Rscript tests/check-selectivity.R
+Rscript tests/check-hsp.R
 ```
 
 Checks cover validation, RNG isolation, unequal sex sizes, census sampling,
@@ -283,3 +364,11 @@ normalized histogram expectations, zero-match plots, and immutable trial setting
 The selectivity checks cover fixed offspring samples, independent sex-specific
 sampling, full-window restoration, exact regeneration, eligible ERRO expectations,
 failure without partial saves, induced estimation bias, and four-tab budgets.
+
+The sibling checks compare family-count results with explicit pair enumeration,
+check full-sibling double contributions and large count arithmetic, independent
+seasonal luck, fixed size effects, census effective numbers, compact regeneration,
+zero-match plots, scenario isolation, switching without losing trials, unique UI
+IDs, and shared POP/HSP storage budgets. Growth checks cover deterministic von B
+increments, nonshrinking and bounded stochastic increments, no mortality, updated
+two-episode enrichment weights, and replay of legacy fixed-size archives.

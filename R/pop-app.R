@@ -43,10 +43,11 @@
 }
 
 #' Build the interface for the parent-offspring scenarios
+#' @param embedded Return page contents for embedding in the app switcher.
 #' @return A Shiny UI object.
 #' @keywords internal
-pop_app_ui <- function() {
-  shiny::fluidPage(
+pop_app_ui <- function(embedded = FALSE) {
+  contents <- shiny::tagList(
     shiny::tags$head(shiny::tags$style(shiny::HTML("
       body { background:#f5f5ef; color:#233a3d; font-size:15px; }
       .container-fluid { max-width:1480px; }
@@ -82,6 +83,7 @@ pop_app_ui <- function() {
         .pop_scenario_ui(ns = shiny::NS("breaking"), size_based = TRUE, selective = TRUE))
     )
   )
+  if (embedded) contents else shiny::fluidPage(contents)
 }
 
 #' Build the shared section layout with scenario-specific additions
@@ -123,7 +125,7 @@ pop_app_ui <- function() {
               limits$trials, " trials; ", limits$trial_samples / 1e6,
               " million sampled individuals across reps per trial; ", limits$session_samples / 1e6,
               " million sampled individuals per session; ", limits$replicate_population / 1e6,
-              " million population individuals in any one replicate. Session limits are shared across all tabs.")),
+              " million population individuals in any one replicate. Session limits are shared across both apps and all tabs.")),
             shiny::downloadButton(ns("download_trials"), "Save complete trials (RDS)"),
             shiny::br(), shiny::br(),
             shiny::downloadButton(ns("download_register"), "Save trial table (CSV)")
@@ -594,7 +596,8 @@ pop_app_ui <- function() {
 #' @return Reactive handles for each tab, useful for integration checks.
 #' @keywords internal
 pop_app_server <- function(input, output, session) {
-  usage <- .pop_session_usage()
+  usage <- session$userData$ckmr_usage
+  if (is.null(usage)) usage <- .pop_session_usage()
   equal <- .pop_scenario_server(input, output, session, shared_usage = usage)
   unequal <- .pop_unequal_server("unequal", shared_usage = usage)
   size <- .pop_size_scenario_server("size", shared_usage = usage)
@@ -627,9 +630,12 @@ pop_app_server <- function(input, output, session) {
 
 #' Build sex-specific model controls and immediate numerical previews
 #' @param ns Shiny namespace function.
+#' @param fixed_output_cv Fix reproductive output CV at zero for persistent
+#' size-based sibling experiments and hide that input from participants.
+#' @param episode_growth Include HSP controls for one year of nonshrinking growth.
 #' @return Section 00 UI; previews do not modify saved trials.
 #' @keywords internal
-.pop_size_section <- function(ns) {
+.pop_size_section <- function(ns, fixed_output_cv = FALSE, episode_growth = FALSE) {
   labels <- c(Linf = "Mean Linf (length units)", K = "Mean K (per year)",
     t0 = "t0 (years)", Z = "Mortality Z (per year)", min_age = "Minimum adult age",
     max_age = "Maximum adult age", Linf_cv = "Linf CV", K_cv = "K CV",
@@ -641,15 +647,23 @@ pop_app_server <- function(input, output, session) {
   shiny::div(class = "section",
     shiny::h3("00 \u00b7 Growth, age, and reproductive sampling weights"),
     shiny::p("Length = Linf * (1 - exp(-K * (age - t0))). Individual Linf and K are positive lognormal traits; their controls specify arithmetic means and CVs, with correlation on the log scale. A CV of zero removes that source of variation."),
-    shiny::p("Reproductive propensity = length^exponent times independent, mean-one lognormal variation. Divide by the within-sex population mean to obtain ERRO. These relative reproductive sampling weights determine parental assignments; they are not biological body mass. A CV of 0.3 means 30%."),
+    shiny::p(if (fixed_output_cv) "Reproductive propensity = length^exponent. ERRO is this propensity divided by the within-sex population mean. Sampling weights are determined entirely by length, with no additional lucky-litter variation." else "Reproductive propensity = length^exponent times independent, mean-one lognormal variation. Divide by the within-sex population mean to obtain ERRO. These relative reproductive sampling weights determine parental assignments; they are not biological body mass. A CV of 0.3 means 30%."),
+    if (episode_growth) shiny::tagList(
+      shiny::h4("Growth between breeding episodes"),
+      shiny::checkboxInput(ns("growth"), "One year of growth between episodes", TRUE),
+      shiny::numericInput(ns("growth_cv"), "Annual growth-rate multiplier CV", .25, min = 0, max = 3, step = .05),
+      shiny::p("Each adult keeps its individual Linf and K. Over one year, its remaining distance to Linf decreases by a fraction 1 - exp(-K * multiplier). The positive multiplier is lognormal with mean one and the CV above. CV = 0 gives deterministic von Bertalanffy growth. Lengths never decrease or exceed individual Linf. All adults survive, even beyond the initial maximum-age cutoff. Uncheck growth to compare with fixed adult traits."),
+      shiny::p(class = "hint", "Previews below describe episode 1. Saved population figures in section 01 can show either episode. Relative ERRO may fall even when length increases, if other adults grow faster.")),
     shiny::fluidRow(lapply(seq_along(c("Female", "Male")), function(i) {
       sex <- c("Female", "Male")[i]
       defaults <- pop_size_parameters(exponent = if (sex == "Female") 3 else 1)
+      if (fixed_output_cv) defaults$output_cv <- 0
       shiny::column(6, shiny::h4(style = paste0("color:", if (sex == "Female") "#237e83" else "#bd7330", ";"), sex),
         lapply(seq_along(defaults), function(j) {
           name <- names(defaults)[j]
-          shiny::numericInput(ns(paste(tolower(sex), name, sep = "_")), labels[[name]],
+          control <- shiny::numericInput(ns(paste(tolower(sex), name, sep = "_")), labels[[name]],
             defaults[[name]], min = mins[j], max = maxs[j], step = steps[j])
+          if (fixed_output_cv && name == "output_cv") shiny::div(style = "display:none;", control) else control
         }))
     })),
     shiny::textOutput(ns("size_preview_status")),
@@ -738,7 +752,7 @@ pop_app_server <- function(input, output, session) {
 #' @return Numeric total, reactive when called inside a reactive context.
 #' @keywords internal
 .pop_usage_total <- function(usage, prefix) {
-  sum(vapply(c("equal", "unequal", "size", "breaking"), function(s) {
+  sum(vapply(c("equal", "unequal", "size", "breaking", "hs_equal", "hs_lucky", "hs_cross_lucky", "hs_size"), function(s) {
     value <- usage[[paste(prefix, s, sep = "_")]]
     if (is.null(value)) 0 else value
   }, numeric(1)))
