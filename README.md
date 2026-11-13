@@ -5,10 +5,10 @@ analysis, see [the tidy R Markdown examples](tidy_rmd_examples/README.md).
 The notebook starts from his original data, keeps preparation visible, and
 checks agreement with the original likelihood when his packages are available.
 
-A pair of teaching apps for exploring close-kin mark-recapture. The launch screen
-offers **Parent-offspring (POP)** and **Siblings (HSP)**. The top buttons switch
-directly between them; **Switch app** returns to the chooser. Both apps remain
-in the same session, so their controls and separate saved-trial registries survive
+One launcher offers **Parent-offspring (POP)**, **Siblings (HSP)**, and
+**Sampling design / Laugh test**. The top buttons switch directly between
+them; **Switch app** returns to the chooser. The apps remain in the same session,
+so controls, separate saved-trial registries, and design-editor values survive
 switching. A browser restart starts a new session.
 
 The parent-offspring app's
@@ -31,6 +31,93 @@ From this repository in R:
 install.packages(c("shiny", "ggplot2", "tibble")) # once, if needed
 shiny::runApp()
 ```
+
+## Sampling design and expected kin counts
+
+The third app prepares inputs for and runs `microscoping::ckmr_laugh_test()`.
+Calculations require an installed version with the `samp_nya` matrix interface
+(tested with 1.1.2); the input editor and exports work without it. Restart Shiny
+after updating the package. Explanations beside each input describe its meaning
+and the package's treatment, including the equal-sex and steady-state assumptions.
+
+Four aligned age curves describe population numbers (both sexes), biological
+weight, proportion mature, and relative sampling allocation scores. Draw a stroke
+across ages with a mouse or touch pointer, or open a curve's numeric table to
+edit values or paste the entire vector. Numeric tables have a bounded horizontal
+scroll window, visible scroll track, and sticky Age/Value labels. Focus the
+window and use arrow keys, Home, or End as a keyboard alternative to scrolling.
+Presets, multiplication controls, and display-scale controls help refine a shape. Maturity is bounded by
+zero and one; other values must be finite and nonnegative. Strokes send a single
+completed edit to Shiny, and intervening ages are filled as the pointer moves.
+
+The final age category is a plus group: `12+` means every age from 12 onward.
+Its population entry is the total number of those animals, and its sampling
+entry allocates samples to the whole group. **Set age grid** starts fresh example
+curves on a new grid, retaining the current total abundance. The button is
+deliberate; merely typing a new age does not reset a drawing. **Undo last curve
+edit** restores previous curves and grids, retaining up to 25 changes. It does
+not undo annual sample counts or comparison settings. **Set total abundance**
+rescales the population shape; editing ages individually may change that total.
+
+**Sampling years, numbers, and age composition** groups annual sample counts
+with a year selector, the sampling editor, and allocation previews. Append a
+number to the comma-separated counts to add a year. Curves belong to positions
+in that list (Year 1, Year 2, etc.); zero counts retain gap years. The selected
+year's colored line is prominent, with other active years muted behind it.
+Drawing, numeric edits, pasting, presets, and scaling apply only to that year.
+**Copy this curve to all active years** is an undoable operation and leaves
+hidden curves unchanged.
+
+Removing final entries hides those years without deleting their curves from
+session memory. Restoring those year positions recovers their previous values;
+a genuinely new year inherits the currently selected curve. Changing sample
+counts alone never changes the curves. Age-grid changes and Reset all curves
+explicitly reinitialize active and cached curves; Undo restores the snapshot.
+
+Sampling scores are normalized separately for each year to obtain `samp_pata`,
+the age composition of the sample, **not age-specific probabilities of catching
+population individuals**. The prepared matrix has rows in consecutive-year order
+and columns in age order, ending at the plus group, with explicit dimension names.
+Each row sums to one, even when its year's sample count is zero. Multiplying a
+whole row by a positive constant leaves that year's proportions unchanged.
+Only active years enter the matrix and exports. The selected year's normalized
+proportions appear below the editor; a heatmap and table show fractional expected
+allocations across all active years. These are allocations rather than simulated
+or rounded sample counts.
+
+The juvenile comparison cutoff is distinct from maturity. Advanced explanations
+cover the catch-curve fitting start and whether adults sampled in an offspring's
+birth year can count as possible parents. The final view exposes all numeric
+schedules, normalized sampling proportions, and biological weight times maturity.
+CSV downloads contain one row per active year and age, including raw scores,
+normalized proportions, annual effort, and expected allocations. The R-input
+download contains exact function arguments: `samp_nya` is an unnamed year-by-age
+matrix of sample **numbers**, obtained by multiplying each year's proportions
+by its annual effort. Its example package call is commented out.
+
+**Calculate expected kin pairs** runs the installed package on a snapshot of the
+current inputs. It saves expected juvenile-offspring POPs, adult-offspring POPs,
+juvenile HSPs and GGPs, and juvenile/adult sample allocations. Select earlier
+calculations to compare them; editing inputs never changes a saved result.
+The app indicates when the current inputs differ from the displayed calculation.
+Results can be exported as CSV or as an RDS containing the input snapshot,
+exact function arguments, package version, and preparation details. Values stay
+in the Shiny session when switching between the three apps; export them to keep
+them beyond that session. These are rough expected counts, not precision estimates.
+
+The results also show the package's smoothed population and expanded plus group,
+without changing the curves in the editor. A preflight uses its `smooth_n` helper
+and its default plus-group expansion to bound the large work arrays before
+calculation (five million cells in one principal array). Designs exceeding that
+interactive budget can still be exported for separate R calculations. This
+preflight is checked against 1.1.2; kin counts always come from the installed
+`ckmr_laugh_test()`, with `extraplus = FALSE`.
+
+`R/laugh-inputs.R` contains documented preparation/validation functions;
+`R/laugh-calculation.R` converts the inputs and calls the installed package;
+`R/laugh-app.R` holds the interface and session history. The pointer editor and
+its styles are in `www/laugh-editor.js` and `www/laugh-editor.css`. Illustrative
+defaults use a declining age distribution; they are not assessment data.
 
 ## Sibling experiments
 
@@ -346,6 +433,8 @@ Rscript tests/check-random-reproduction.R
 Rscript tests/check-size-reproduction.R
 Rscript tests/check-selectivity.R
 Rscript tests/check-hsp.R
+Rscript tests/check-laugh-editor.R
+Rscript tests/check-laugh-calculation.R
 ```
 
 Checks cover validation, RNG isolation, unequal sex sizes, census sampling,
@@ -372,3 +461,10 @@ zero-match plots, scenario isolation, switching without losing trials, unique UI
 IDs, and shared POP/HSP storage budgets. Growth checks cover deterministic von B
 increments, nonshrinking and bounded stochastic increments, no mortality, updated
 two-episode enrichment weights, and replay of legacy fixed-size archives.
+
+The design-editor checks cover plus-group totals, row normalization, matrix
+orientation and dimension names, year-specific expected allocations and gap years,
+input bounds, stale-edit rejection, active-year editing, hidden-year restoration,
+new-year inheritance, copy-to-all/undo, undo across age grids, clear/reset workflows,
+and state preservation across the three-app launcher. Browser checks also cover
+painting, the year dropdown, and scrolling all the way to an older plus group.

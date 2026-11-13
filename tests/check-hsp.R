@@ -1,6 +1,6 @@
 # Run from project root: Rscript tests/check-hsp.R
 for (file in c("pop-simulation.R", "pop-plots.R", "pop-app.R", "hsp-simulation.R",
-               "hsp-plots.R", "hsp-app.R", "ckmr-app.R")) source(file.path("R", file))
+               "hsp-plots.R", "hsp-app.R", "laugh-inputs.R", "laugh-calculation.R", "laugh-app.R", "ckmr-app.R")) source(file.path("R", file))
 expect_error <- function(code) stopifnot(inherits(tryCatch({force(code); NULL}, error = identity), "error"))
 expect_error(hsp_settings(Sk1 = 1))
 expect_error(hsp_settings(scenario = "cross_lucky", Sk2 = 3000))

@@ -1,0 +1,40 @@
+.laugh-stage { padding:10px 14px; background:#e9f3f1; border-radius:6px; margin-top:12px; }
+.laugh-toolbar { position:sticky; top:0; z-index:100; padding:10px 14px; background:#f5f5ef;
+  border:1px solid #dce3df; border-radius:8px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.laugh-toolbar span { color:#55696c; font-size:13px; }
+#laugh_results_section { scroll-margin-top:90px; }
+.laugh-argument { font-family:monospace; color:#55696c; }
+.laugh-editor-controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:12px 0; }
+.laugh-editor-controls label { display:flex; align-items:center; gap:7px; font-weight:normal; margin:0; }
+.laugh-editor-controls select, .laugh-editor-controls input { border:1px solid #b8c8c7; border-radius:4px; padding:5px 7px; background:white; }
+.laugh-editor-controls input { width:100px; }
+.laugh-editor svg { display:block; width:100%; height:auto; min-height:150px; touch-action:none;
+  border:1px solid #e1e7e4; border-radius:7px; background:#fcfdfb; cursor:crosshair; user-select:none; }
+.laugh-editor svg text { fill:#55696c; font-family:Arial,sans-serif; font-size:13px; pointer-events:none; }
+.laugh-editor-status { margin:6px 0; min-height:20px; color:#55696c; font-size:13px; }
+.laugh-editor, .laugh-curve-section { min-width:0; max-width:100%; }
+.laugh-editor details { margin:12px 0; min-width:0; max-width:100%; }
+.laugh-editor summary, .section > details > summary { cursor:pointer; color:#237e83; font-weight:600; }
+.laugh-editor-table { display:block; width:100%; max-width:100%; min-width:0;
+  overflow-x:scroll; overflow-y:hidden; padding-bottom:5px; margin-top:10px;
+  border:1px solid #dce3df; border-radius:5px; scrollbar-width:auto; scrollbar-color:#789b9c #edf3f1; }
+.laugh-editor-table::-webkit-scrollbar { height:14px; }
+.laugh-editor-table::-webkit-scrollbar-track { background:#edf3f1; border-radius:7px; }
+.laugh-editor-table::-webkit-scrollbar-thumb { background:#789b9c; border:3px solid #edf3f1; border-radius:7px; }
+.laugh-editor-table:focus { outline:2px solid #237e83; outline-offset:2px; }
+.laugh-editor-table table { border-collapse:separate; border-spacing:0; table-layout:fixed; width:max-content; min-width:max-content; margin:0; }
+.laugh-editor-table th { padding:6px 10px; text-align:center; background:#edf3f1; }
+.laugh-editor-table td { padding:3px; }
+.laugh-editor-table th:first-child { position:sticky; left:0; z-index:2; background:#edf3f1;
+  min-width:76px; box-shadow:2px 0 3px #dce3df; }
+.laugh-editor-table th:not(:first-child), .laugh-editor-table td { min-width:108px; }
+.laugh-editor-table input { width:102px; padding:6px; border:1px solid #cbd6d1; border-radius:3px; }
+.laugh-editor-table input:focus { outline:2px solid #237e83; outline-offset:1px; }
+.laugh-editor-paste { display:flex; align-items:start; gap:8px; flex-wrap:wrap; margin-top:10px; }
+.laugh-editor-paste textarea { width:min(100%,700px); min-height:55px; padding:7px; border:1px solid #cbd6d1; border-radius:4px; }
+.laugh-curve-section details p { margin:8px 0; }
+.laugh-year-legend { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0; }
+.laugh-year-legend > span { border-left:4px solid; padding:5px 9px; background:#f3f6f5; border-radius:3px; }
+.laugh-year-legend .laugh-year-active { font-weight:700; background:#e9f3f1; }
+.laugh-year-legend .laugh-year-muted { color:#657778; }
+@media(max-width:650px) { .laugh-editor svg text { font-size:15px; } .laugh-toolbar { position:static; } }
