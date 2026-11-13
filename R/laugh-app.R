@@ -19,7 +19,7 @@ laugh_app_ui <- function() {
     shiny::div(class = "section",
       shiny::h3("01 \u00b7 Population age grid and abundance"),
       shiny::fluidRow(
-        shiny::column(6, shiny::numericInput("laugh_plus_age", "Plus group begins at age", 12, min = 4, max = 60, step = 1),
+        shiny::column(6, shiny::numericInput("laugh_plus_age", "Plus group begins at age", 12, min = 4, max = 200, step = 1),
           shiny::actionButton("laugh_apply_age", "Set age grid"),
           shiny::p(class = "hint", "This replaces the population curves and every active or cached sampling curve with fresh examples on the new grid. Undo restores the previous grid and curves. Merely typing an age does not change them.")),
         shiny::column(6, shiny::numericInput("laugh_abundance", "Set total population abundance to", 1e5, min = 1, step = 1000),

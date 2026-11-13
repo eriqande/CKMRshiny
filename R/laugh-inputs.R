@@ -10,7 +10,7 @@
 #' @export
 laugh_default_curves <- function(plus_age = 12, abundance = 1e5, num_years = 3) {
   .pop_integer(plus_age, "Plus-group age")
-  if (plus_age < 4 || plus_age > 60) stop("Choose a plus-group age from 4 to 60.")
+  if (plus_age < 4 || plus_age > 200) stop("Choose a plus-group age from 4 to 200.")
   if (length(abundance) != 1L || !is.finite(abundance) || abundance <= 0)
     stop("Total abundance must be positive.")
   .pop_integer(num_years,"Number of sampling curves")

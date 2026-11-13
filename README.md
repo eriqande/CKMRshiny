@@ -119,6 +119,82 @@ preflight is checked against 1.1.2; kin counts always come from the installed
 its styles are in `www/laugh-editor.js` and `www/laugh-editor.css`. Illustrative
 defaults use a declining age distribution; they are not assessment data.
 
+## Standalone simulation check of the laugh test
+
+`R/laugh-simulation.R` is a small verification tool, independent of Shiny. It
+borrows only microscoping's private demographic helpers (`smooth_n` and
+`get_psurv`); it independently generates pedigrees and counts relationships.
+Its demographic preparation currently follows microscoping 1.1.2. It does not
+copy the package's kin-probability formulas or modify the installed package.
+
+Start with [examples/check-laugh-test.R](examples/check-laugh-test.R). A single
+named list describes both calculations:
+
+```r
+source("R/laugh-simulation.R")
+design <- list(
+  nata = c(512, 256, 128, 64, 64),
+  wata = c(0, 1, 1, 1, 1),
+  pmatata = c(0, 1, 1, 1, 1),
+  samp_nya = rbind(c(10, 6, 6, 6, 0),
+                  c(10, 6, 6, 6, 0),
+                  c(10, 6, 6, 6, 0)),
+  MAX_JUVE_AGE = 2
+)
+checked <- check_laugh_test(design, num_reps = 500, seed = 1401)
+checked$comparison
+checked$simulation$preparation$ages
+checked$simulation$preparation$diagnostics
+head(checked$simulation$first$pedigree)
+head(checked$simulation$first$samples)
+```
+
+You can also call `do.call(microscoping::ckmr_laugh_test, design)` and
+`do.call(simulate_laugh_test, c(design, list(num_reps = 100, seed = 1401)))`
+separately. The legacy `samp_pata`/`samp_ny` input is supported too. Returned
+tables are ordinary data frames. The seed is local: simulations restore the
+caller's random state, including when they fail.
+
+The simulator uses equal sex schedules and maintains fixed whole-number
+age/sex abundances by uniform random thinning, with constant recruitment.
+Each offspring receives independently drawn parents, proportional to
+`wata * pmatata`. These are expected outputs, without persistent individual
+maturity states, mate fidelity, or additional reproductive heterogeneity.
+Age-zero output must be zero. Founders are replaced through three expanded
+lifespans of burn-in before sampling, so sampled grandparent relationships
+can be recovered. Fractional age/sex sample allocations are stochastically
+rounded independently, preserving their expectations. Samples within a
+year/sex/age category are drawn without replacement; recaptures across years
+are allowed.
+The retained pedigree includes birth and death years, allowing reconstruction
+of the simulated censuses; a missing death year means alive at the final census.
+
+The samples are nonlethal observations. Kin counts explicitly apply the
+package's eligibility rules: a POP parent must be sampled after the offspring's
+birth year (or in that year with `beqy_POP = TRUE`); a GGP grandparent must be
+sampled strictly after the intermediate parent's birth year. This checks those
+restricted comparison counts, not population changes caused by lethal sampling.
+Shared-parent matches count both parents of full siblings; grandparent matches
+count each pedigree path. HSP/GGP summaries include only different birth
+cohorts and two juvenile sample events.
+
+This is an approximate finite-population benchmark. Inspect the returned age
+table and diagnostics: fractional population abundances are rounded per sex,
+and the simulator kills individuals after the final expanded age. The package's
+HSP survival calculation can extrapolate beyond that age. Consequently, Monte
+Carlo error is not the only possible source of differences. The comparison
+reports simulation means, Monte Carlo standard errors, and standardized
+differences, without an automatic pass/fail label. A zero Monte Carlo SE gives
+`NA` for the standardized difference, rather than claiming agreement. These
+standard errors describe simulation uncertainty, not CKMR estimator precision.
+
+Oversized examples stop with an explanatory error before population allocation.
+Defaults allow at most 20,000 standing individuals, 200,000 pedigree records per
+replicate, 500,000 sample-event pairs per replicate, and twenty million records
+or pair checks across the batch. The comparison also checks the analytic work
+grid before invoking microscoping. This tool intentionally supports only
+`extraplus = FALSE`; it is intended for small implementation checks.
+
 ## Sibling experiments
 
 The sibling app follows the same sections 00-04, colors, trial/replicate controls,
@@ -435,6 +511,7 @@ Rscript tests/check-selectivity.R
 Rscript tests/check-hsp.R
 Rscript tests/check-laugh-editor.R
 Rscript tests/check-laugh-calculation.R
+Rscript tests/check-laugh-simulation.R
 ```
 
 Checks cover validation, RNG isolation, unequal sex sizes, census sampling,
