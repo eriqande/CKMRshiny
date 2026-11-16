@@ -2,10 +2,13 @@
 #' @return Embedded Shiny interface with manual calculation and saved snapshots.
 #' @export
 laugh_app_ui <- function() {
+  # runApp(app_object) does not mount the working directory's www automatically.
+  # Register explicitly so launching from an argument list gets the editors too.
+  shiny::addResourcePath("ckmr-design-assets",normalizePath("www",mustWork=TRUE))
   info <- .laugh_curve_info()
   shiny::tagList(
-    shiny::tags$head(shiny::tags$link(rel = "stylesheet", href = "laugh-editor.css"),
-                     shiny::tags$script(src = "laugh-editor.js")),
+    shiny::tags$head(shiny::tags$link(rel = "stylesheet", href = "ckmr-design-assets/laugh-editor.css"),
+                     shiny::tags$script(src = "ckmr-design-assets/laugh-editor.js")),
     shiny::div(class = "hero", shiny::div(class = "eyebrow", "CKMR \u00b7 sampling design"),
       shiny::h1("Sample design---laugh test"),
       shiny::p("Shape age schedules, inspect the numbers, and see how a proposed sample is allocated."),
@@ -19,7 +22,7 @@ laugh_app_ui <- function() {
     shiny::div(class = "section",
       shiny::h3("01 \u00b7 Population age grid and abundance"),
       shiny::fluidRow(
-        shiny::column(6, shiny::numericInput("laugh_plus_age", "Plus group begins at age", 12, min = 4, max = 200, step = 1),
+        shiny::column(6, shiny::numericInput("laugh_plus_age", "Plus group begins at age", 12, min = 2, max = 200, step = 1),
           shiny::actionButton("laugh_apply_age", "Set age grid"),
           shiny::p(class = "hint", "This replaces the population curves and every active or cached sampling curve with fresh examples on the new grid. Undo restores the previous grid and curves. Merely typing an age does not change them.")),
         shiny::column(6, shiny::numericInput("laugh_abundance", "Set total population abundance to", 1e5, min = 1, step = 1000),
@@ -30,8 +33,9 @@ laugh_app_ui <- function() {
       shiny::p(class = "hint", "Choose an exact age below the plus group. Older ages inside a plus group cannot be separated using one aggregate entry."),
       shiny::tags$details(shiny::tags$summary("More about the calculation"),
         shiny::p("The package excludes same-birth-cohort sibling comparisons. Grandparent-grandchild matches can resemble half-sibling matches genetically, so the calculation reports both. The juvenile cutoff helps limit that ambiguity and restricts attention to offspring that can be aged adequately."),
-        shiny::numericInput("laugh_catch_min", "Youngest age used to fit the catch curve", 1, min = 0, max = 9, step = 1),
-        shiny::p("MIN_CATCH_CURVE_AGE controls which population ages are used to smooth numbers at age and infer survival. It can exclude the youngest ages if their mortality differs strongly. This does not remove those ages from your population or samples. The input plus group is excluded from fitting. This editor leaves at least three exact-age classes for the fit."),
+        shiny::numericInput("laugh_catch_min", "Youngest age used to fit the catch curve", 1, min = 0, max = 10, step = 1),
+        shiny::p("MIN_CATCH_CURVE_AGE controls which population ages are used to smooth numbers at age and infer survival. It can exclude the youngest ages if their mortality differs strongly. This does not remove those ages from your population or samples. The input plus group is excluded from fitting. This editor leaves at least two exact-age classes for the fit."),
+        shiny::numericInput("laugh_etriv", "Old-age reproductive-output tolerance (etriv)", .01, min=.000001, max=.99, step=.01),
         shiny::checkboxInput("laugh_after_spawning", "Allow a parent sampled in its offspring's birth year", FALSE),
         shiny::p("This sets beqy_POP. The default FALSE excludes these same-year parent/offspring comparisons because parents sampled during spawning may not yet have completed reproduction. TRUE is appropriate only if adult sampling is understood to happen after spawning in the year convention being used."),
         shiny::p("The calculation keeps the supplied plus-group abundance (extraplus = FALSE) and expands it into older ages internally. Body weight and maturity stay at their last supplied values. The default expansion tolerance, etriv = 0.01, targets an old-age tail accounting for about 1% of fecundity. This processing runs only when you calculate; it does not change the editor curves."))),
@@ -115,6 +119,8 @@ laugh_app_server <- function(input, output, session) {
   info <- .laugh_curve_info()
   selected_year <- shiny::reactiveVal(1L)
   active_counts <- shiny::reactiveVal(c(500,500,500))
+  settings <- shiny::reactiveVal(list(MAX_JUVE_AGE=2L,MIN_CATCH_CURVE_AGE=1L,beqy_POP=FALSE,etriv=.01,extraplus=FALSE))
+  years_error <- shiny::reactiveVal("")
   calculations <- shiny::reactiveVal(list())
   calculation_error <- shiny::reactiveVal("")
   commit <- function(next_state, message) {
@@ -127,7 +133,9 @@ laugh_app_server <- function(input, output, session) {
   }
   shiny::observeEvent(input$laugh_years,{
     counts <- tryCatch(laugh_parse_years(input$laugh_years),error=identity)
-    if(inherits(counts,"error")) { status(conditionMessage(counts)); return() }
+    if(inherits(counts,"error")) { years_error(conditionMessage(counts)); status(conditionMessage(counts)); return() }
+    years_error("")
+    if(.laugh_same_counts(counts,active_counts())) counts <- active_counts()
     s <- state(); previous <- length(active_counts()); cached <- nrow(s$sample_scores)
     n <- length(counts); template <- selected_year()
     next_state <- laugh_ensure_years(s,n,template)
@@ -158,7 +166,7 @@ laugh_app_server <- function(input, output, session) {
   # edit, not hundreds of mouse-move events. Painting never calls the package.
   send <- function() {
     s <- laugh_ensure_years(state(),length(active_counts()),selected_year())
-    juvenile <- input$laugh_juvenile
+    juvenile <- settings()$MAX_JUVE_AGE
     if (is.null(juvenile) || !is.finite(juvenile)) juvenile <- 2
     session$sendCustomMessage("laugh_editor_state", list(plus_age = s$plus_age,
       juvenile = min(juvenile, s$plus_age-1), revision = revision(),
@@ -230,7 +238,11 @@ laugh_app_server <- function(input, output, session) {
   shiny::observeEvent(input$laugh_undo, {
     h <- history()
     if (!length(h)) { status("No earlier curve edit to undo."); return() }
-    restored <- h[[length(h)]]; current <- state()
+    restored <- h[[length(h)]]
+    if(isTRUE(restored$import_snapshot)) {
+      history(head(h,-1)); apply_import(restored$design); status("Previous inputs restored, including sampling totals and calculation settings."); return()
+    }
+    current <- state()
     # A year added since this snapshot must not disappear when an earlier curve
     # edit is undone. Preserve its cached row when the age grid is unchanged.
     old_rows <- nrow(restored$sample_scores); new_rows <- nrow(current$sample_scores)
@@ -243,20 +255,49 @@ laugh_app_server <- function(input, output, session) {
   })
   shiny::observe({
     a <- state()$plus_age
+    cfg <- settings(); cfg$MAX_JUVE_AGE <- min(cfg$MAX_JUVE_AGE,a-1); cfg$MIN_CATCH_CURVE_AGE <- min(cfg$MIN_CATCH_CURVE_AGE,a-2)
+    if(!identical(cfg,settings())) settings(cfg)
     shiny::updateNumericInput(session, "laugh_juvenile", max = a-1,
-      value = if (is.null(input$laugh_juvenile)) 2 else min(input$laugh_juvenile, a-1))
-    shiny::updateNumericInput(session, "laugh_catch_min", max = a-3,
-      value = if (is.null(input$laugh_catch_min)) 1 else min(input$laugh_catch_min, a-3))
+      value = cfg$MAX_JUVE_AGE)
+    shiny::updateNumericInput(session, "laugh_catch_min", max = a-2,
+      value = cfg$MIN_CATCH_CURVE_AGE)
   })
-  years <- shiny::reactive(laugh_parse_years(input$laugh_years))
-  prepared <- shiny::reactive(tryCatch(laugh_prepare_inputs(state(), years(),
-    juvenile = input$laugh_juvenile, catch_min = input$laugh_catch_min,
-    after_spawning = isTRUE(input$laugh_after_spawning)), error = identity))
+  years <- shiny::reactive({ if(nzchar(years_error())) stop(years_error());active_counts() })
+  ids <- c(MAX_JUVE_AGE="laugh_juvenile",MIN_CATCH_CURVE_AGE="laugh_catch_min",beqy_POP="laugh_after_spawning",etriv="laugh_etriv")
+  for(k in names(ids)) local({key <- k; id <- ids[[k]]
+    shiny::observeEvent(input[[id]],{cfg <- settings(); v <- input[[id]]
+      if(key %in% c("MAX_JUVE_AGE","MIN_CATCH_CURVE_AGE") && length(v)==1 && is.finite(v) && v==floor(v)) v <- as.integer(v)
+      cfg[[key]] <- v;settings(cfg)})
+  })
+  prepared <- shiny::reactive(tryCatch({
+    cfg <- settings()
+    x <- laugh_prepare_inputs(state(),years(),cfg$MAX_JUVE_AGE,cfg$MIN_CATCH_CURVE_AGE,cfg$beqy_POP)
+    if(length(cfg$etriv)!=1 || !is.finite(cfg$etriv) || cfg$etriv<=0 || cfg$etriv>=1) stop("etriv must lie strictly between 0 and 1.")
+    x$etriv <- cfg$etriv; x
+  }, error=identity))
   arguments <- shiny::reactive({
     x <- prepared()
     shiny::validate(shiny::need(!inherits(x, "error"), if (inherits(x,"error")) conditionMessage(x) else ""))
     x
   })
+  # Apply only fully validated imports. Canonical values update together; browser
+  # input messages follow, so old controls cannot mix with a newly imported grid.
+  apply_import <- function(x) {
+    state(x$states$laugh); active_counts(x$counts); settings(x$settings); selected_year(1L)
+    years_error(""); calculation_error(""); revision(revision()+1L)
+    vals <- list(laugh_abundance=sum(state()$curves$nata),laugh_plus_age=state()$plus_age,laugh_juvenile=x$settings$MAX_JUVE_AGE,
+      laugh_catch_min=x$settings$MIN_CATCH_CURVE_AGE,laugh_etriv=x$settings$etriv)
+    for(id in names(vals)) { shiny::freezeReactiveValue(input,id); shiny::updateNumericInput(session,id,value=vals[[id]]) }
+    shiny::freezeReactiveValue(input,"laugh_years"); shiny::updateTextInput(session,"laugh_years",value=.laugh_count_text(x$counts))
+    shiny::freezeReactiveValue(input,"laugh_after_spawning"); shiny::updateCheckboxInput(session,"laugh_after_spawning",value=x$settings$beqy_POP)
+    shiny::updateSelectInput(session,"laugh_sampling_year",choices=stats::setNames(seq_along(x$counts),paste("Year",seq_along(x$counts))),selected="1")
+  }
+  import_design <- function(x) {
+    stopifnot(x$kind=="laugh")
+    before <- list(import_snapshot=TRUE,design=list(states=list(laugh=state()),counts=active_counts(),settings=settings()))
+    history(tail(c(history(),list(before)),25)); apply_import(x)
+    status("Imported design. Undo restores the previous inputs; saved calculations are unchanged.")
+  }
   age_labels <- shiny::reactive(c(as.character(0:(state()$plus_age-1)), paste0(state()$plus_age,"+")))
   allocation <- shiny::reactive(laugh_sample_allocation(arguments()$samp_pata, arguments()$samp_ny))
   output$laugh_edit_status <- shiny::renderText(status())
@@ -307,8 +348,11 @@ laugh_app_server <- function(input, output, session) {
   output$laugh_export_controls <- shiny::renderUI({
     if (inherits(prepared(),"error")) shiny::p(class="hint","Complete the inputs above to enable export.") else
       shiny::tagList(shiny::downloadButton("laugh_download_csv","Download age schedules (CSV)"),
-                    " ",shiny::downloadButton("laugh_download_r","Download R inputs"))
+                    " ",shiny::downloadButton("laugh_download_r","Download R inputs"),
+                    " ",shiny::downloadButton("laugh_download_inputs_rds","Download inputs (RDS)"))
   })
+  output$laugh_download_inputs_rds <- shiny::downloadHandler(filename=function()"ckmr-laugh-test-inputs.rds",
+    content=function(file) saveRDS(laugh_function_arguments(arguments()),file))
   output$laugh_download_csv <- shiny::downloadHandler(filename=function()"ckmr-laugh-test-age-inputs.csv",
     content=function(file) { arguments(); utils::write.csv(table_data(),file,row.names=FALSE) })
   output$laugh_download_r <- shiny::downloadHandler(filename=function()"ckmr-laugh-test-inputs.R",
@@ -413,5 +457,6 @@ laugh_app_server <- function(input, output, session) {
       if(y==selected_year())" (editing)"))))
   invisible(list(state=state,history=history,arguments=arguments,prepared=prepared,allocation=allocation,
     revision=revision,selected_year=selected_year,active_counts=active_counts,
-    calculations=calculations,selected_calculation=selected_calculation,calculation_error=calculation_error))
+    calculations=calculations,selected_calculation=selected_calculation,calculation_error=calculation_error,
+    import_design=import_design,settings=settings))
 }

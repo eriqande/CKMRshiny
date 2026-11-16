@@ -38,3 +38,5 @@
 .laugh-year-legend .laugh-year-active { font-weight:700; background:#e9f3f1; }
 .laugh-year-legend .laugh-year-muted { color:#657778; }
 @media(max-width:650px) { .laugh-editor svg text { font-size:15px; } .laugh-toolbar { position:static; } }
+
+.clt2-pair .laugh-editor svg text { font-size:22px; }

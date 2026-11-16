@@ -14,7 +14,7 @@ laugh_function_arguments <- function(design) {
       any(!is.finite(p)) || any(p<0) || any(abs(rowSums(p)-1)>1e-10))
     stop("The sampling proportions must be a row-normalized year-by-age matrix.")
   counts <- unname(p * ny)
-  if(any(!is.finite(counts)) || any(counts<0) || sum(counts)<=0)
+  if(any(!is.finite(counts)) || any(counts<0) || sum(counts)<0)
     stop("Allocated sample numbers must be finite, nonnegative, and have a positive total.")
   if(!is.finite(sum(design$nata)) || !is.finite(sum(design$nata*design$wata*design$pmatata)))
     stop("The population or reproductive-output total is too large to represent numerically.")

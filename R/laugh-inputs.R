@@ -10,7 +10,7 @@
 #' @export
 laugh_default_curves <- function(plus_age = 12, abundance = 1e5, num_years = 3) {
   .pop_integer(plus_age, "Plus-group age")
-  if (plus_age < 4 || plus_age > 200) stop("Choose a plus-group age from 4 to 200.")
+  if (plus_age < 2 || plus_age > 200) stop("Choose a plus-group age from 2 to 200.")
   if (length(abundance) != 1L || !is.finite(abundance) || abundance <= 0)
     stop("Total abundance must be positive.")
   .pop_integer(num_years,"Number of sampling curves")
@@ -109,18 +109,20 @@ laugh_curve_preset <- function(state, key, preset = "example",year=1) {
 }
 
 #' Parse consecutive sampling-year counts, including zero-sample gap years
-#' @param text Comma, whitespace, or semicolon-separated nonnegative integers.
-#' @return Numeric vector of 1-12 annual counts, preserving zero entries.
+#' @param text Comma, whitespace, or semicolon-separated nonnegative counts.
+#' Fractional expected counts are preserved.
+#' @param allow_zero Allow zero total effort (e.g. one sex is unsampled).
+#' @return Numeric vector of 1-12 annual counts, preserving zeros and fractions.
 #' @export
-laugh_parse_years <- function(text) {
+laugh_parse_years <- function(text, allow_zero = FALSE) {
   if (length(text) != 1 || is.na(text) || !nzchar(trimws(text)))
     stop("Enter sample counts for at least one year.")
   tokens <- strsplit(trimws(text), "[,;[:space:]]+")[[1]]
   values <- suppressWarnings(as.numeric(tokens))
   if (!length(values) || length(values) > 12 || any(!is.finite(values)) ||
-      any(values < 0 | values != floor(values)))
-    stop("Enter 1 to 12 nonnegative whole-number annual counts, separated by commas or spaces.")
-  if (sum(values) <= 0) stop("At least one year must have a positive sample count.")
+      any(values < 0))
+    stop("Enter 1 to 12 finite, nonnegative annual counts, separated by commas or spaces.")
+  if (!allow_zero && sum(values) <= 0) stop("At least one year must have a positive sample count.")
   values
 }
 
@@ -145,13 +147,14 @@ laugh_validate_curve <- function(state, key, values) {
 #' @param juvenile Maximum exact age classified as juvenile for comparisons.
 #' @param catch_min Youngest age used for fitting the steady-state catch curve.
 #' @param after_spawning Allow a parent caught in the offspring's birth year.
+#' @param allow_zero Allow this sex's annual counts to sum to zero.
 #' @return Named argument list, with row-normalized year-by-age samp_pata matrix
 #' and explicit package
 #' defaults. No package call, age smoothing, plus-group expansion, or kin-count
 #' computation is performed. Convert with laugh_function_arguments() before
 #' calling microscoping: its samp_nya argument requires counts, not proportions.
 #' @export
-laugh_prepare_inputs <- function(state, years, juvenile = 2, catch_min = 1, after_spawning = FALSE) {
+laugh_prepare_inputs <- function(state, years, juvenile = 2, catch_min = 1, after_spawning = FALSE, allow_zero = FALSE) {
   keys <- c("nata","wata","pmatata")
   curves <- lapply(keys, function(key)
     laugh_validate_curve(state, key, state$curves[[key]]))
@@ -161,9 +164,9 @@ laugh_prepare_inputs <- function(state, years, juvenile = 2, catch_min = 1, afte
     stop("At least one populated age must have positive weight and maturity.")
   if (length(juvenile) != 1 || !is.finite(juvenile) || juvenile < 0 || juvenile != floor(juvenile) || juvenile >= state$plus_age)
     stop("Choose a whole-number juvenile cutoff below the plus-group age.")
-  if (length(catch_min) != 1 || !is.finite(catch_min) || catch_min < 0 || catch_min != floor(catch_min) || catch_min > state$plus_age-3)
-    stop("The catch-curve start must leave at least three exact-age classes to fit.")
-  if (!is.numeric(years) || !length(years) || any(!is.finite(years)) || any(years < 0 | years != floor(years)) || sum(years) <= 0)
+  if (length(catch_min) != 1 || !is.finite(catch_min) || catch_min < 0 || catch_min != floor(catch_min) || catch_min > state$plus_age-2)
+    stop("The catch-curve start must leave at least two exact-age classes to fit.")
+  if (!is.numeric(years) || !length(years) || any(!is.finite(years)) || any(years < 0) || (!allow_zero && sum(years) <= 0))
     stop("Supply nonnegative annual sample counts with a positive total.")
   if (!is.logical(after_spawning) || length(after_spawning) != 1 || is.na(after_spawning)) stop("Choose a sampling-timing option.")
   scores <- laugh_ensure_years(state,length(years))$sample_scores[seq_along(years),,drop=FALSE]
@@ -190,4 +193,21 @@ laugh_sample_allocation <- function(proportions, years) {
   grid <- expand.grid(age = seq_len(ncol(proportions))-1L, year = seq_along(years))
   grid$expected_samples <- proportions[cbind(grid$year,grid$age+1L)] * years[grid$year]
   tibble::as_tibble(grid)
+}
+
+#' Format annual expected counts without losing precision on browser round trips
+#' @param counts Numeric annual counts.
+#' @return Comma-separated values preserving double-precision fractional counts.
+#' @keywords internal
+.laugh_count_text <- function(counts) paste(sprintf("%.17g",counts),collapse=", ")
+
+#' Recognize a browser echo of expected counts despite decimal parsing roundoff
+#' @param x,y Numeric counts with the same vector/matrix layout.
+#' @return TRUE only for equal layouts and values within a few machine epsilons.
+#' Retain the canonical values in that case; importing must not add Undo entries
+#' just because a decimal string returns one floating-point step away.
+#' @keywords internal
+.laugh_same_counts <- function(x,y) {
+  identical(dim(x),dim(y)) && length(x)==length(y) &&
+    all(abs(x-y)<=8*.Machine$double.eps*pmax(abs(x),abs(y),.Machine$double.xmin))
 }

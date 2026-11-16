@@ -4,7 +4,9 @@
   "use strict";
   const NS = "http://www.w3.org/2000/svg";
   const editors = new Map();
-  let latest = null, sequence = 0, registered = false;
+  const states = new Map();
+  let sequence = 0, registered = false;
+  const stateFor = e => states.get(e.scope);
   const bounds = {left:78, right:980, top:20, bottom:226, width:1000, height:278};
   function html(tag, attrs, text) {
     const e = document.createElement(tag);
@@ -19,7 +21,7 @@
     return e;
   }
   function emit(name, payload) {
-    if (window.Shiny) Shiny.setInputValue(name, {...payload,sequence:++sequence},{priority:"event"});
+    if (window.Shiny && typeof Shiny.setInputValue === "function") Shiny.setInputValue(name, {...payload,sequence:++sequence},{priority:"event"});
   }
   function ageLabel(index, age) { return index === age ? age+"+" : String(index); }
   function concise(value) { return Number(value.toPrecision(6)).toLocaleString(undefined,{maximumSignificantDigits:6}); }
@@ -28,11 +30,12 @@
     const step=Math.pow(10,Math.floor(Math.log10(value))-1);
     return Number((Math.ceil(value/step)*step).toPrecision(8));
   }
-  function sendEdit(e, year=e.year, revision=latest.revision) {
-    emit("laugh_curve_edit",{key:e.key, year, values:e.values.slice(), revision});
+  function sendEdit(e, year=e.year, revision=stateFor(e).revision) {
+    emit(e.scope+"_curve_edit",{key:e.key, year, values:e.values.slice(), revision});
     e.status.textContent = "Edit sent. Numeric values and normalized allocations update below.";
   }
   function render(e) {
+    const latest=stateFor(e);
     if (!latest || !e.values) return;
     const n = e.values.length, max = Number(e.maximum.value), age = latest.plus_age;
     const step = (bounds.right-bounds.left)/n;
@@ -67,6 +70,7 @@
     e.inputs.forEach((input,i)=> { if (document.activeElement!==input) input.value=Number(e.values[i].toPrecision(10)); });
   }
   function buildTable(e) {
+    const latest=stateFor(e);
     const scroll=e.table.scrollLeft;
     const table=html("table"), ages=html("tr"), values=html("tr");
     ages.appendChild(html("th",{scope:"row"},"Age")); values.appendChild(html("th",{scope:"row"},"Value"));
@@ -102,6 +106,7 @@
         (bounds.bottom-local.y)/(bounds.bottom-bounds.top)*Number(e.maximum.value))), x:local.x,y:local.y};
   }
   function paint(e,p) {
+    const latest=stateFor(e);
     const previous=e.last;
     if (previous && previous.i!==p.i) {
       const direction=p.i>previous.i?1:-1;
@@ -113,18 +118,18 @@
     render(e);
   }
   function createEditor(root) {
-    const key=root.dataset.key, e={root,key,inputs:[]};
+    const key=root.dataset.key, scope=root.dataset.scope||"laugh", e={root,key,scope,inputs:[]};
     const controls=html("div",{class:"laugh-editor-controls"});
     const label=html("label",{},"Starting shape"), preset=html("select",{"aria-label":key+" starting shape"});
     [["example","Example"],["flat","Flat"],["increasing","Increasing"],["declining","Declining"],["bell","Bell-shaped"],["clear","Clear to zero"]]
       .forEach(([value,text])=>preset.appendChild(html("option",{value},text)));
     label.appendChild(preset); controls.appendChild(label);
     const apply=html("button",{type:"button",class:"btn btn-default"},"Apply shape");
-    apply.addEventListener("click",()=>emit("laugh_curve_action",{key,year:e.year,action:"preset",preset:preset.value,revision:latest.revision}));
+    apply.addEventListener("click",()=>emit(e.scope+"_curve_action",{key,year:e.year,action:"preset",preset:preset.value,revision:stateFor(e).revision}));
     controls.appendChild(apply);
     [.5,2].forEach(factor=> {
       const button=html("button",{type:"button",class:"btn btn-default","aria-label":key+" multiply all values by "+factor},factor===.5?"Values \u00d7 0.5":"Values \u00d7 2");
-      button.addEventListener("click",()=>emit("laugh_curve_action",{key,year:e.year,action:"scale",factor,revision:latest.revision}));
+      button.addEventListener("click",()=>emit(e.scope+"_curve_action",{key,year:e.year,action:"scale",factor,revision:stateFor(e).revision}));
       controls.appendChild(button);
     });
     const scaleLabel=html("label",{},"View y maximum"), maximum=html("input",{type:"number",min:.000001,step:"any","aria-label":key+" view y maximum"});
@@ -155,7 +160,7 @@
     pasteButton.addEventListener("click",()=> {
       const tokens=area.value.trim().split(/[,;\s]+/), numbers=tokens.map(Number);
       if (!area.value.trim() || numbers.length!==e.values.length || numbers.some(v=>!Number.isFinite(v)||v<0||(key==="pmatata"&&v>1))) {
-        e.status.textContent="Paste exactly "+e.values.length+" finite nonnegative values"+(key==="pmatata"?", all at most 1":"")+" (ages 0 through "+latest.plus_age+"+)."; return;
+        e.status.textContent="Paste exactly "+e.values.length+" finite nonnegative values"+(key==="pmatata"?", all at most 1":"")+" (ages 0 through "+stateFor(e).plus_age+"+)."; return;
       }
       e.values=numbers; e.maximum.value=key==="pmatata"?1:Math.max(Number(e.maximum.value),...numbers);
       render(e); sendEdit(e);
@@ -166,7 +171,7 @@
       const p=point(e,event);
       if(p.x<bounds.left||p.x>bounds.right||p.y<bounds.top||p.y>bounds.bottom) return;
       event.preventDefault(); e.before=e.values.slice(); e.last=null; e.drawing=true;
-      e.strokeYear=e.year; e.strokeRevision=latest.revision;
+      e.strokeYear=e.year; e.strokeRevision=stateFor(e).revision;
       e.svg.setPointerCapture(event.pointerId); paint(e,p);
     });
     e.svg.addEventListener("pointermove",event=> { if(e.drawing) paint(e,point(e,event)); });
@@ -179,13 +184,14 @@
     e.svg.addEventListener("pointercancel",()=> {
       if(e.drawing) { e.values=e.before; e.drawing=false; e.last=null; render(e); e.status.textContent="Stroke cancelled."; }
     });
-    editors.set(key,e);
+    editors.set(scope+":"+key,e);
   }
   function update(message) {
-    latest=message;
+    const scope=message.scope||"laugh";
+    states.set(scope,message);
     if(!editors.size) return;
     message.curves.forEach(curve=> {
-      const e=editors.get(curve.key); if(!e) return;
+      const e=editors.get(scope+":"+curve.key); if(!e) return;
       // Never replace an in-progress stroke with a cutoff-only server update.
       if(e.drawing) return;
       const changedGrid=!e.values || e.values.length!==curve.values.length;
@@ -207,12 +213,12 @@
     });
   }
   function ready() {
-    if(window.Shiny && !registered) { Shiny.addCustomMessageHandler("laugh_editor_state",update); registered=true; }
-    document.querySelectorAll(".laugh-editor").forEach(root=> {if(!editors.has(root.dataset.key)) createEditor(root);});
-    if(latest) update(latest);
+    if(window.Shiny && typeof Shiny.addCustomMessageHandler === "function" && !registered) { Shiny.addCustomMessageHandler("laugh_editor_state",update); registered=true; }
+    document.querySelectorAll(".laugh-editor").forEach(root=> {if(!editors.has((root.dataset.scope||"laugh")+":"+root.dataset.key)) createEditor(root);});
+    states.forEach(update);
     emit("laugh_editor_ready",{});
   }
-  if(window.Shiny) { Shiny.addCustomMessageHandler("laugh_editor_state",update); registered=true; }
+  if(window.Shiny && typeof Shiny.addCustomMessageHandler === "function") { Shiny.addCustomMessageHandler("laugh_editor_state",update); registered=true; }
   if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",ready); else ready();
   if(window.jQuery) jQuery(document).on("shiny:connected",ready);
 })();

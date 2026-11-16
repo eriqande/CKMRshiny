@@ -1,6 +1,6 @@
 # Run from the project root: Rscript tests/check-laugh-editor.R
 for (f in c("pop-simulation.R","pop-plots.R","pop-app.R","hsp-simulation.R",
-            "hsp-plots.R","hsp-app.R","laugh-inputs.R","laugh-calculation.R","laugh-app.R","ckmr-app.R")) source(file.path("R",f))
+            "hsp-plots.R","hsp-app.R","laugh-inputs.R","laugh-calculation.R","design-import.R","clt2-calculation.R","laugh-app.R","clt2-app.R","ckmr-app.R")) source(file.path("R",f))
 expect_error <- function(code) stopifnot(inherits(tryCatch({force(code);NULL},error=identity),"error"))
 
 s <- laugh_default_curves(12,1e6)
@@ -8,8 +8,8 @@ stopifnot(s$plus_age==12,all(lengths(s$curves)==13),abs(sum(s$curves$nata)-1e6)<
   abs(tail(s$curves$nata,1)/s$curves$nata[12] - .75/(1-.75))<1e-12)
 years <- laugh_parse_years("500, 0; 1000\n250")
 stopifnot(identical(years,c(500,0,1000,250)))
-for (bad in c("", "0,0", "1,-1", "1,0.5", "1,what", "Inf")) expect_error(laugh_parse_years(bad))
-expect_error(laugh_default_curves(2)); expect_error(laugh_default_curves(100))
+for (bad in c("", "0,0", "1,-1", "1,what", "Inf")) expect_error(laugh_parse_years(bad))
+expect_error(laugh_default_curves(1)); expect_error(laugh_default_curves(201))
 expect_error(laugh_validate_curve(s,"pmatata",rep(2,13)))
 expect_error(laugh_validate_curve(s,"wata",rep(-1,13)))
 expect_error(laugh_validate_curve(s,"nata",1:4))

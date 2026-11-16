@@ -34,9 +34,62 @@ shiny::runApp()
 
 ## Sampling design and expected kin counts
 
-The third app prepares inputs for and runs `microscoping::ckmr_laugh_test()`.
+The third app now has **One-sex laugh test** and **clt2: a two-sex laugh test**
+tabs. Both call the installed microscoping package. The two-sex tab needs the
+repaired `clt2()` sex/year/age interface (tested with the local 1.1.4 fork).
+It pairs female and male population, body-weight, maturity, and sampling editors.
+Each sex has its own abundance and year-specific sample totals/compositions;
+the age grid, comparison cutoff, and calculation settings are shared. The existing combined counts remain unchanged. With the fork's optional
+`by_parent_sex` support, **04.1 · Kin counts by parent sex** adds female/male
+POP and HSP contributions below the combined results. POP sex refers to the
+sampled parent; HSP sex refers to the unobserved shared parent. GGPs remain
+combined. Each pair of female/male contributions sums to its existing total.
+The extra sums run in blocks and add no full parent-sex-by-pair probability
+array. The default native call still skips that extra work; this app requests
+it when supported. Older installations and saved calculations retain the
+combined results and show a rebuild/recalculate hint for the extra section.
+Parent-sex counts have a separate CSV export and are included in saved RDS
+calculations; the original combined CSV and numeric results are unchanged. Copy controls transfer
+female curves to males or the selected year's curve to all active years. Undo
+on this tab restores the previous complete design, including totals/settings.
+The `clt2()` preflight includes all three sex dimensions in the workload budget.
+
+### Import and export a design
+
+Use **Import inputs** above the tabs to load an RDS containing a named argument
+list. The app recognizes the function from its argument names and opens the
+matching tab. Both full sample-count matrices/arrays and sampling margins are
+accepted. Full counts take precedence. Female/male labels are respected even
+when rows are reversed; ordinary arrays and correctly indexed offarrays work.
+Population curves retain the supplied values before package smoothing.
+
+Validation precedes replacement. Failed imports leave both editors unchanged;
+successful imports are undoable and preserve all saved calculations. Zero-sample
+years receive a flat, editable age-composition curve while retaining zero effort.
+Fractional expected sample counts are preserved. Supported grids have a plus
+group from 2 to 200 and 1-12 consecutive sampling years. Unsupported arguments
+are reported; `want_gory_details` is disabled in app calls. The one-sex editor
+supports `extraplus = FALSE`; the two-sex editor supports either treatment.
+
+Each tab has **Download inputs (RDS)** for a reusable argument list, alongside R
+and CSV exports. The larger saved-calculation RDS files can also be imported;
+the importer extracts their `function_arguments` list.
+
+To initialize the app directly from an R session, run from the repo root:
+
+```r
+source("app.R")
+source("examples/design-input-lists.R") # illustrative laugh_inputs / clt2_inputs
+shiny::runApp(ckmr_design_app(inputs = clt2_inputs))
+# Or: saveRDS(clt2_inputs, "design.rds") and use Import inputs in the app.
+# The same list works with do.call(microscoping::clt2, clt2_inputs).
+```
+
+### One-sex editor
+
+The first tab prepares inputs for and runs `microscoping::ckmr_laugh_test()`.
 Calculations require an installed version with the `samp_nya` matrix interface
-(tested with 1.1.2); the input editor and exports work without it. Restart Shiny
+(tested with 1.1.4); the input editor and exports work without it. Restart Shiny
 after updating the package. Explanations beside each input describe its meaning
 and the package's treatment, including the equal-sex and steady-state assumptions.
 
@@ -56,7 +109,8 @@ entry allocates samples to the whole group. **Set age grid** starts fresh exampl
 curves on a new grid, retaining the current total abundance. The button is
 deliberate; merely typing a new age does not reset a drawing. **Undo last curve
 edit** restores previous curves and grids, retaining up to 25 changes. It does
-not undo annual sample counts or comparison settings. **Set total abundance**
+not undo annual sample counts or comparison settings for ordinary curve edits.
+Undoing an import restores the full prior input design, including those settings. **Set total abundance**
 rescales the population shape; editing ages individually may change that total.
 
 **Sampling years, numbers, and age composition** groups annual sample counts
@@ -110,7 +164,7 @@ without changing the curves in the editor. A preflight uses its `smooth_n` helpe
 and its default plus-group expansion to bound the large work arrays before
 calculation (five million cells in one principal array). Designs exceeding that
 interactive budget can still be exported for separate R calculations. This
-preflight is checked against 1.1.2; kin counts always come from the installed
+preflight is checked against 1.1.4; kin counts always come from the installed
 `ckmr_laugh_test()`, with `extraplus = FALSE`.
 
 `R/laugh-inputs.R` contains documented preparation/validation functions;
@@ -511,6 +565,7 @@ Rscript tests/check-selectivity.R
 Rscript tests/check-hsp.R
 Rscript tests/check-laugh-editor.R
 Rscript tests/check-laugh-calculation.R
+Rscript tests/check-design-import.R
 Rscript tests/check-laugh-simulation.R
 ```
 
@@ -545,3 +600,19 @@ input bounds, stale-edit rejection, active-year editing, hidden-year restoration
 new-year inheritance, copy-to-all/undo, undo across age grids, clear/reset workflows,
 and state preservation across the three-app launcher. Browser checks also cover
 painting, the year dropdown, and scrolling all the way to an older plus group.
+
+The import/two-sex checks cover matrix and 3-D-array round trips, reversed sex
+order, marginal inputs, fractional and zero-year allocations, atomic import
+failures, startup argument lists, import undo, cached years, independent sex
+edits, saved-result immutability, native package agreement and both plus-group
+treatments. The preflight expanded populations are checked against the package's
+retained populations. See `R/design-import.R`, `R/clt2-calculation.R`, and
+`R/clt2-app.R` for the documented adapters and two-sex interface.
+
+The parent-sex extension checks use independently enumerated scalar POP/HSP
+sums, reversed sex order, symmetric sexes, no samples, and female-only samples.
+Female-only samples have zero paternal POPs but can have paternal HSPs.
+`clt2(by_parent_sex=TRUE)` adds the plain matrix attribute
+`attr(result, "kin_by_parent_sex")`, with F/M rows and POP_offJ, POP_offA,
+HSP_JJ columns, while retaining the original six numeric results. Rebuild the
+microscoping fork and restart Shiny to enable it in your regular R library.
