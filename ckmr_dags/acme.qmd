@@ -1,0 +1,312 @@
+---
+title-meta: "Acme Archipelago: a DAG for one candidate pair"
+format:
+  pdf:
+    documentclass: article
+    pdf-engine: pdflatex
+    papersize: letter
+    fontsize: 11pt
+    geometry: margin=0.8in
+    colorlinks: true
+    keep-tex: false
+    include-in-header:
+      text: |
+        \usepackage{amsmath,amssymb}
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+\begin{center}
+{\Large\bfseries Acme Archipelago: a DAG for one candidate pair\par}
+\vspace{0.4em}
+{\normalsize Known ages, equal reproduction, and lethal sampling\par}
+\end{center}
+\newcommand{\Ju}{\mathrm{Ju}}
+\newcommand{\Ad}{\mathrm{Ad}}
+
+
+We consider two distinct, sampled females: a _candidate offspring_, denoted
+by the subscript $\mathrm{Ju}$, and a _candidate mother_, denoted by subscript
+$\mathrm{Ad}$. These are roles in a comparison: the candidate offspring may
+be an adult when sampled, but is called the "juvenile" when being compared as
+a candidate offspring. The graph represents the marginal probability
+of one pair of individuals, _conditioned on their ages and sampling years_.  The CKMR pseudo-likelihood
+is formed by multiplying these marginal probabilities over all pairs of individuals.
+It is a pseudolikelihood because those pairs are not necessarily independent, though
+in large populations under sparse sampling, this can be a good approximation.  As
+discussed in the workshop, the product
+over all pairs can be reduced to a product of Poisson probabilities over the
+different combinations of the juvenile and adult covariates upon which the probabilities
+are conditioned (in this case, age and sampling year). 
+
+![A single-pair model for the Acme Archipelago represented as an acyclic directed graph (DAG).  See the text for explanation.](figures/acme-dag.pdf){#fig-acme width=80% fig-pos='H'}
+
+In the DAG above, circular nodes shaded with gray fill denote observed quantities;
+the unshaded circular nodes are unobserved variables. Dark pink fill denotes a parameter to be estimated. Nodes with pink outlines mark
+quantities whose values (or the conditional distributions of those values) depend
+on the parameter values.
+These are values that must be recalculated
+during separate computations of the pseudo-log-likelihood during optimization.
+Dashed nodes---and dashed arrows entering them---identify
+_bookkeeping intermediates_. These are values that can be deterministically
+determined by the observed covariates and, hence, could be removed from the model
+specification; however I find that explicitly including them provides a helpful
+reminder of what they are, and representing them explicitly might become useful
+later when covariates are uncertain.  Shaded gray diamonds denote fixed inputs or modeling choices.
+
+
+# What each node means
+
+We use $A$ for age at sampling and $Y$ for year of sampling.
+The recorded ages and sampling years are the covariates observed on the samples:
+$A_{\mathrm{Ju}}$, $Y_{\mathrm{Ju}}$, $A_{\mathrm{Ad}}$, $Y_{\mathrm{Ad}}$.
+In the Acme Archipelago example, we condition on these data, on both individuals
+being female, and on the comparison being included in the analysis. Since we are
+conditioning on the ages and sampling years (and because they are observed without
+error) we do not need to know or specify a distribution for
+sampled ages and years to write down this conditional likelihood.
+
+The rose-filled nodes show the parameters. They are $\theta=(N_{0,f},\lambda)$:
+adult female abundance at the reference year and an instantaneous exponential
+rate of increase, such that $N_{t,f} = N_{0,f}\exp\{\lambda (t - y_0)\}$.
+The reference year $y_0$ is a modeling choice, so it is shown as a diamond node.
+It is typically set to the earliest juvenvile birth year.  It is worth pointing
+out here that $N_{0,f}$ counts the number of _mature_ adult females.
+
+There are two bookkeeping intermediate nodes in the graph.  The first is $B_\Ju$,
+the birth year of the juvenile.  This can be calculated simply as $B_\Ju = Y_\Ju - A_\Ju$,
+but it is an extremely important quantity that warrants its own node, even if if it
+is just a deterministic function of the juvenile's covariates.  The second bookkeeping
+intermediate is $\mathring{A}_\Ad$. This can also be calculated
+from the ages and sampling years of the juvenile and the adult:
+$\mathring{A}_\Ad = A_\Ad - (Y_\Ad - B_\Ju)$, but it is valuable
+to be able to refer to it explicitly.  The little circle floating above the $A$
+in $\mathring{A}_\Ad$ is a notation that we use to mean 
+"_at the time of the candidate offspring's birth._"
+
+We use that little circle to denote $\mathring{R}_\Ad$, the candidate mother's reproductive
+output at the time of the candidate offspring's birth.  This $\mathring{R}_\Ad$ can
+be interpreted as the expected reproductive output of the female adult, and it can
+be on a relative scale.  A little bit of explanation is warranted here.  Let's
+go back to Mark's fundamental equation for the probability of being a parent-offspring
+pair (POP):
+$$
+\begin{aligned}
+\mathbb{P}[\mbox{Ad~is~Ju's~mum} &\mid \mbox{stuff~about~Ad~and~Ju}] =  \\
+\mathbb{E}\biggl[ &\frac
+{\#~\mbox{of~Ad's Ju-like offspring at~}B_\Ju}
+{\mbox{Total~\#~of-Ju-like~offspring~at~}B_\Ju}
+~\biggl | ~
+\mbox{stuff (i.e., covariates) about Ad and Ju}
+\biggr ]
+\end{aligned}
+$$
+In words, this is saying that the probability Ad is Ju's mum, given what we know about
+Ad and Ju, is calculated as the expected fraction of all the offspring that "are like"
+Ju (i.e., that have the same covariates as Ju) at the time of Ju's birth (i.e., at $B_\Ju$)
+that were produced by Ad, given what we know about Ad and Ju (i.e., given the covariates
+we have observed on Ad and Ju). This is nothing more than the mathematical statement of
+what we learned when discussing "Space toast."  
+
+One thing that we did not talk about in our week in Hawaii is that the above expression
+is the expected value of a ratio of two variables.  If the numerator and the denominator
+were independent random variables, than the expectation of that ratio would be the
+ratio of the expectations.  However, Ad's Ju-like offspring are part of the total output
+of Ju-like offspring at $B_\Ju$.  Thus, the numerator and the denominator are not
+actually independent.  Nonetheless, if the total number of adults is large and the
+variance in output of any one adult is not large, the expectation of the ratio above
+is well approximate by the ratio of the expectations, so, it is standard in CKMR
+to evaluate the kinship probability as:
+$$
+\begin{aligned}
+\mathbb{P}[&\mbox{Ad~is~Ju's~mum} \mid \mbox{stuff~about~Ad~and~Ju}] \approx  \\
+&\frac
+{E[\#~\mbox{of~Ad's Ju-like offspring at~}B_\Ju~|~\mbox{stuff (i.e., covariates) about Ad and Ju}]}
+{E[\mbox{Total~\#~of-Ju-like~offspring~at~}B_\Ju~|~\mbox{stuff (i.e., covariates) about Ju and the population]}}
+\end{aligned}
+$$
+
+In the current case, the covariates are simply age and sampling year, and the
+expected reproductive output of a female in the population is the same across
+all mature females, which simplifies things considerably.  But, as we go forward
+into the more complex cases, it will, perhaps, be valuable to keep in our minds that,
+essentially in our CKMR DAG, here, we are treating $\mathring{A}_\Ad$ as the expected value:
+$$
+\mathring{R}_\Ad \equiv E[\#~\mbox{of~Ad's Ju-like offspring at~}B_\Ju~|~\mbox{stuff (i.e., covariates) about Ad and Ju}],
+$$
+where "# of offspring" is interpreted as a relative number.
+The dependence in that conditional expectation is captured by the arrows in the DAG.
+The parents of $\mathring{R}_\Ad$ in the DAG are $B_\Ju$, $\mathring{A}_\Ad$, $Y_\Ad$,
+and $A_\mathrm{mat}$, and those are precisely the variables that occur in the
+expression for $\mathring{R}_\Ad$, which describes the fact that Ad has reproductive
+output typical of any female adult so long as she was mature at $B_\Ju$ and also that
+she was not lethally sampled before $B_\Ju$:
+$$
+\mathring{R}_\Ad = 1\{\mathring{A}_\Ad \geq A_\mathrm{mat}\} 1\{Y_\Ad \geq B_\Ju\}
+$$
+This is effectively saying that if a female is alive and mature at the time of
+the offspring's birth she contributes one unit of expected relative output.
+The first indicator requires maturity at
+birth. The second requires that lethal capture did not precede that birth.
+Sampling in Acme Archipelago is strictly after breeding, so equality $Y_{\mathrm{Ad}}=B_{\mathrm{Ju}}$
+is allowed. No forward-survival probability is needed in this example.
+
+$A_{\mathrm{mat}}$ is a supplied knife-edge maturity age. Neither is estimated
+by this likelihood.
+
+
+Every mature female has the same expected output. In those same relative
+units, total expected output in the birth year is
+
+$$
+h=N_{0,f}\exp\{\lambda(B_{\mathrm{Ju}}-y_0)\},
+\qquad \mathring R_{\mathrm{Tot}}=h.
+$$
+
+**Unobserved does not mean conditionally random.** Here both reproductive
+outputs are determined once their parents in the graph are specified. Their
+unshaded nodes retain the biological interpretation and leave room for later
+models in which reproduction is genuinely variable.
+
+Finally, $K=1$ means the candidate mother is the offspring's mother; $K=0$
+means she is not. It need not mean the two animals are otherwise unrelated.
+$K^*$ is the recorded/detected mother-offspring classification.
+
+# The observation model
+
+Write $\alpha$ for the false-positive rate and $\beta$ for the false-negative
+rate. They are fixed inputs here, not parameters estimated by the Acme
+likelihood. We generally aim to make $\alpha$ negligible and take it as zero.
+**Mark's Acme example assumes $\alpha=0$ and $\beta=0$.** Keeping $K$ latent
+and $K^*$ observed makes the detection step explicit even in that special case.
+
+\newpage
+
+# Conditional probabilities implied by the graph
+
+Let $\delta_x$ denote a point-mass distribution concentrated at $x$. A
+point mass expresses a deterministic conditional relationship; it does not
+introduce additional uncertainty. For the six non-root nodes:
+
+$$
+\begin{aligned}
+B_{\mathrm{Ju}}\mid A_{\mathrm{Ju}},Y_{\mathrm{Ju}}
+  &\sim \delta_{Y_{\mathrm{Ju}}-A_{\mathrm{Ju}}},\\[3pt]
+\mathring A_{\mathrm{Ad}}\mid A_{\mathrm{Ad}},Y_{\mathrm{Ad}},B_{\mathrm{Ju}}
+  &\sim \delta_{A_{\mathrm{Ad}}-Y_{\mathrm{Ad}}+B_{\mathrm{Ju}}},\\[3pt]
+\mathring R_{\mathrm{Ad}}\mid\mathring A_{\mathrm{Ad}},Y_{\mathrm{Ad}},B_{\mathrm{Ju}},A_{\mathrm{mat}}
+  &\sim \delta_g,\\[3pt]
+\mathring R_{\mathrm{Tot}}\mid N_{0,f},\lambda,B_{\mathrm{Ju}},y_0
+  &\sim \delta_h,\\[3pt]
+K\mid\mathring R_{\mathrm{Ad}},\mathring R_{\mathrm{Tot}}
+  &\sim \operatorname{Bernoulli}\!\left(
+       \frac{\mathring R_{\mathrm{Ad}}}{\mathring R_{\mathrm{Tot}}}\right),\\[3pt]
+K^*\mid K,\alpha,\beta
+  &\sim \operatorname{Bernoulli}\{\alpha+(1-\alpha-\beta)K\}.
+\end{aligned}
+$$
+
+The last line means $P(K^*=1\mid K=0)=\alpha$ and
+$P(K^*=1\mid K=1)=1-\beta$. Each distribution belongs to a node **conditional
+on all its parents**, rather than to an individual arrow.
+
+## Multiply the node conditionals
+
+For compactness, call the first four conditional distributions above
+$q_B$, $q_A$, $q_{\mathrm{Ad}}$, and $q_{\mathrm{Tot}}$, respectively, with
+their conditioning arguments exactly as displayed. Let $d$ collect their four
+node values and $c=(y_0,A_{\mathrm{mat}},\alpha,\beta)$. The conditional joint
+law factors as
+
+$$
+\begin{split}
+p(d,k,k^*\mid z,c,\theta)
+={}&q_B\,q_A\,q_{\mathrm{Ad}}\,q_{\mathrm{Tot}}\\
+&\times \operatorname{Bern}\!\left(k;
+    \frac{\mathring R_{\mathrm{Ad}}}{\mathring R_{\mathrm{Tot}}}\right)
+ \operatorname{Bern}\{k^*;\alpha+(1-\alpha-\beta)k\}.
+\end{split}
+$$
+
+Here $p$ is shorthand for the mixed point-mass/Bernoulli law; $\operatorname{Bern}(k;p)$
+is its usual Bernoulli probability mass. The observed and fixed root nodes are
+conditioned on. $\theta$ indexes the likelihood; no prior distribution is being
+assigned to it.
+
+## Marginalize to the observed pair
+
+The four point masses simply substitute the deterministic values. Summing
+over the unobserved $K\in\{0,1\}$ then gives
+
+$$
+\begin{aligned}
+p_{\mathrm{MOP}}(\theta)&=g/h,\\
+p^*(\theta)&=P(K^*=1\mid z,c,\theta)
+ =\alpha(1-p_{\mathrm{MOP}})+(1-\beta)p_{\mathrm{MOP}},\\
+L_{\mathrm{pair}}(\theta)&=[p^*(\theta)]^{k^*}[1-p^*(\theta)]^{1-k^*}.
+\end{aligned}
+$$
+
+For Acme's perfect classifications, this reduces to the familiar alive/mature
+indicator divided by adult female abundance **in the offspring's birth year**.
+
+\newpage
+
+# A small calculation you can inspect
+
+This function mirrors the named nodes, without environments or special arrays.
+It returns intermediates as well as the observed match probability.
+
+```{r}
+acme_pair <- function(A_Ju, Y_Ju, A_Ad, Y_Ad, N0_f, lambda,
+                      y0, A_mat, alpha = 0, beta = 0) {
+  stopifnot(N0_f > 0, alpha >= 0, alpha <= 1,
+            beta >= 0, beta <= 1)
+  B_Ju <- Y_Ju - A_Ju
+  A_Ad_at_birth <- A_Ad - (Y_Ad - B_Ju)
+  R_Ad_at_birth <- as.numeric(A_Ad_at_birth >= A_mat &
+                               Y_Ad >= B_Ju)
+  R_Tot_at_birth <- N0_f * exp(lambda * (B_Ju - y0))
+  stopifnot(all(is.finite(R_Tot_at_birth)),
+            all(R_Tot_at_birth >= 1))
+  p_MOP <- R_Ad_at_birth / R_Tot_at_birth
+  p_detected <- alpha * (1 - p_MOP) + (1 - beta) * p_MOP
+  data.frame(B_Ju, A_Ad_at_birth, R_Ad_at_birth,
+             R_Tot_at_birth, p_MOP, p_detected)
+}
+```
+
+Two candidate mothers have different ages at the same offspring's birth. The
+second was too young to reproduce; the denominator is identical for both.
+
+```{r}
+example <- acme_pair(
+  A_Ju = 2, Y_Ju = 2015, A_Ad = c(12, 7), Y_Ad = 2016,
+  N0_f = 100000, lambda = 0.02, y0 = 2000, A_mat = 8
+)
+knitr::kable(example, digits = c(0, 0, 0, 1, 7, 7))
+```
+
+```{r}
+#| echo: false
+stopifnot(example$A_Ad_at_birth[1] == 9,
+          example$A_Ad_at_birth[2] == 4,
+          example$p_MOP[1] > 0, example$p_MOP[2] == 0,
+          identical(example$p_MOP, example$p_detected))
+```
+
+**What can be precomputed?** $B_{\mathrm{Ju}}$, $\mathring A_{\mathrm{Ad}}$,
+and $g$ depend only on observed data and supplied constants. The denominator
+$h$, the probabilities, and the likelihood contributions must be recomputed
+when $\theta$ changes. Parameters and computations depending on them belong
+on an AD tape; data-only bookkeeping can be performed beforehand. A pink rim
+on $K^*$ concerns its conditional probability, not a changing observed label.
+
+**From one pair to Mark's fit.** Products of pair marginals form a composite
+or pseudolikelihood because pairs can share individuals. Mark groups
+comparisons into covariate-defined categories and uses a Poisson
+pseudolikelihood, with expected detected matches equal to the number of
+comparisons times $p^*$. That large-population approximation is a separate
+step from the exact single-pair Bernoulli marginal shown here.

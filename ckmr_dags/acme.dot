@@ -1,0 +1,53 @@
+// Graphviz lays out the graph; dot2tex/TikZ typeset every texlbl with LaTeX.
+// Invisible edges constrain ordering and are NOT part of the probabilistic DAG.
+digraph Acme {
+  graph [rankdir=TB, nodesep=0.38, ranksep=0.52, splines=spline, bgcolor=white];
+  node [shape=circle, fixedsize=true, width=0.72, height=0.72, label="", fontsize=12, color="#48535B", penwidth=1.1];
+  edge [arrowsize=0.65, color="#48535B", penwidth=1.0];
+
+  Aju [texlbl="$A_{\mathrm{Ju}}$", kind=observed, style=filled, fillcolor="#EBEDEF", peripheries=2];
+  Yju [texlbl="$Y_{\mathrm{Ju}}$", kind=observed, style=filled, fillcolor="#EBEDEF"];
+  Aad [texlbl="$A_{\mathrm{Ad}}$", kind=observed, style=filled, fillcolor="#EBEDEF"];
+  Yad [texlbl="$Y_{\mathrm{Ad}}$", kind=observed, style=filled, fillcolor="#EBEDEF"];
+  {rank=same; Aju; Yju; Aad; Yad;}
+  Aju -> Yju -> Aad -> Yad [style=invis, weight=100];
+
+  Bju [texlbl="$B_{\mathrm{Ju}}$", kind=bookkeeping, style=dashed];
+  Aat [texlbl="$\mathring{A}_{\mathrm{Ad}}$", kind=bookkeeping, style=dashed];
+  N0f [texlbl="$N_{0,f}$", kind=parameter, style=filled, color="#B83E6B", fillcolor="#B83E6B", lblstyle="text=white"];
+  lambda [texlbl="$\lambda$", kind=parameter, style=filled, color="#B83E6B", fillcolor="#B83E6B", lblstyle="text=white"];
+  y0 [texlbl="$y_0$", kind=fixed, shape=diamond, style=filled, width=0.56, height=0.56, fillcolor="#EBEDEF"];
+  Amat [texlbl="$A_{\mathrm{mat}}$", kind=fixed, shape=diamond, style=filled, width=0.72, height=0.58, fillcolor="#EBEDEF"];
+  {rank=same; N0f; lambda; y0; Aat; Amat;}
+  N0f -> lambda -> y0 -> Aat -> Amat [style=invis, weight=40];
+
+  Rtot [texlbl="$\mathring{R}_{\mathrm{Tot}}$", kind=dependent, color="#B83E6B", penwidth=1.8];
+  Rad [texlbl="$\mathring{R}_{\mathrm{Ad}}$", kind=latent];
+  {rank=same; Rtot; Rad;}
+  Rtot -> Rad [style=invis, weight=20];
+  K [texlbl="$K$", kind=dependent, color="#B83E6B", penwidth=1.8];
+  Kstar [texlbl="$K^*$", kind=observed_dependent, style=filled, fillcolor="#EBEDEF", color="#B83E6B", penwidth=1.8];
+  alpha [texlbl="$\alpha$", kind=fixed, shape=diamond, style=filled, width=0.56, height=0.56, fillcolor="#EBEDEF"];
+  beta [texlbl="$\beta$", kind=fixed, shape=diamond, style=filled, width=0.56, height=0.56, fillcolor="#EBEDEF"];
+  {rank=same; K; alpha; beta;}
+  K -> alpha -> beta [style=invis, weight=30];
+
+  Aju -> Bju [style=dashed];
+  Yju -> Bju [style=dashed];
+  Bju -> Aat [style=dashed];
+  Aad -> Aat [style=dashed];
+  Yad -> Aat [style=dashed];
+  Bju -> Rtot;
+  N0f -> Rtot;
+  lambda -> Rtot;
+  y0 -> Rtot;
+  Aat -> Rad;
+  Yad -> Rad;
+  Bju -> Rad;
+  Amat -> Rad;
+  Rtot -> K;
+  Rad -> K;
+  K -> Kstar;
+  alpha -> Kstar;
+  beta -> Kstar;
+}
