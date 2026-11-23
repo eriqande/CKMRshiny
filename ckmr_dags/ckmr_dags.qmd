@@ -336,3 +336,39 @@ P(K \mid N_{0,f}, \lambda, y_0, A_\mathrm{mat}, A_\Ju, Y_\Ju, A_\Ad, Y_\Ad) =
 \frac{1\{\mathring{A}_\Ad \geq A_\mathrm{mat}\} 1\{Y_\Ad \geq B_\Ju\}}
 {N_{0,f}\exp\{\lambda(B_{\mathrm{Ju}}-y_0)\}}.
 $$
+
+Oh Boy! That seems like a lot of work to get to a simple equation that can be described
+and reasoned through in a few sentences.  But, I am hoping that going through that
+arduous and tedious process will have been helpful when we start adding things to
+the model (at least to make it easier to see how the different models relate).
+
+# Bilateral Bay
+
+In Bilateral Bay, there are two morphs Left-handed and Right-handed.  From other
+sources of data (strandings and gill nets) it appears that the frequency of these
+two morphs vary in different populations; however, it can be assumed that their
+frequency is at an equilibrium.  Handedness does not affect fecundity or survival,
+but it does change the rate of capture in the fish traps of Bilateral Bay.  The
+traps in Bilateral Bay tend to catch Right-handed dolphins more often than
+Left-handed dolphins.  The setup here assumes no survival differences between the morphs,
+so we are essentially ignoring the possibility that the frequency of Right-hand
+morphs might be decreasing over time due to bycatch.  
+
+The modeling here is interesting.  We have multiple POPs, and we know the handedness
+of each member of each POP.  Thus we can estimate the conditional probability that
+an offspring has handedness $H_\Ju$ given that its parent had handedness $H_\Ad$.
+These rates are specified by the parameters $P_{L|L}$, the probability that a
+mother that is L produces a daughter that is L, and $P_{R|R}$, the probability that a
+mother that is R produces a daughter that is R.  Assuming an equilibrium between these
+two rates, the frequncy of left-handed dolphins in the population is
+$$
+P_L = \frac{1 - P_{R|R}}{2 - P_{L|L} - P_{R|R}}
+$$
+
+The probability of sampling an individual is affected only by handedness
+(once age and year are accounted for), but we are conditioning on handedness,
+so we don't have to worry further about the sampling.  
+
+The DAG for this situation appears below.
+
+
