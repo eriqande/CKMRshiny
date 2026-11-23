@@ -95,14 +95,28 @@ reach the age $A_\mathrm{mat}$.
 ## A bare-bones DAG
 
 We start with a very simple DAG to express the conditional probability
-that an Ad-Ju pair is a parent-offspring pair given their ages ($A_\Ad$,$A_\Ju$)
+that an Ad-Ju pair is a parent-offspring pair (POP) given their ages ($A_\Ad$,$A_\Ju$)
 and their sampling years ($S_\Ad$, $S_\Ju$).  Included in the DAG is a reference
 year $y_0$ that the initial population size corresponds to.
+
+![A bare-bones Acme DAG. Ages, sampling years, and the observed kinship $K$ are gray; parameters are unshaded. Shaded diamonds denote fixed inputs.](figures/acme-bare-bones.pdf){#fig-acme-bare-bones width=80% fig-pos='H'}
 
 
 
 The graph represents the marginal probability
-of one pair of individuals, _conditioned on their ages and sampling years_.  The CKMR pseudo-likelihood
+of one pair of individuals, _conditioned on their ages and sampling years_
+which are taken to be observed without uncertainty, and hence are
+shaded gray. $K$ is the kinship of the pair: $K=1$ denotes that they
+are a parent offspring pair and $K=0$ denotes they are not.  This is
+also shaded because we assume that the pair's relationship is
+known without error from genetic data.  This is a proper DAG and it
+expresses that the probability that the pair is a POP can be written
+as the conditional probability
+$$
+P(K \mid N_{0,f}, \lambda, y_0, A_\mathrm{mat}, A_\Ju, Y_\Ju, A_\Ad, Y_\Ad)
+$$
+
+The CKMR pseudo-likelihood
 is formed by multiplying these marginal probabilities over all pairs of individuals.
 It is a pseudolikelihood because those pairs are not necessarily independent, though
 in large populations under sparse sampling, this can be a good approximation.  As
@@ -203,7 +217,7 @@ In the current case, the covariates are simply age and sampling year, and the
 expected reproductive output of a female in the population is the same across
 all mature females, which simplifies things considerably.  But, as we go forward
 into the more complex cases, it will, perhaps, be valuable to keep in our minds that,
-essentially in our CKMR DAG, here, we are treating $\mathring{A}_\Ad$ as the expected value:
+essentially in our CKMR DAG, here, we are treating $\mathring{R}_\Ad$ as the expected value:
 $$
 \mathring{R}_\Ad \equiv E[\#~\mbox{of~Ad's Ju-like offspring at~}B_\Ju~|~\mbox{stuff (i.e., covariates) about Ad and Ju}],
 $$

@@ -26,7 +26,7 @@ Quarto renders the walkthrough.
 
 The pipeline is deliberately external to Quarto:
 
-1. `dot/acme.dot` defines nodes, edges, LaTeX labels (`texlbl`), colors, and ranks.
+1. Sources in `dot/` define nodes, edges, LaTeX labels (`texlbl`), colors, and ranks.
 2. Graphviz selects the layout. The build checks the top-row constraints.
 3. dot2tex generates TikZ, and pdflatex typesets actual LaTeX node labels.
 4. Quarto includes the resulting vector PDF as an ordinary external figure.
@@ -36,14 +36,15 @@ There is no fenced `dot` block. The generated TikZ is not edited by hand.
 Outputs:
 
 - `output/pdf/ckmr_dags.pdf`: walkthrough, factorization, marginalization, and R code.
-- `output/pdf/acme-dag.pdf`: standalone graph for inspection or reuse.
+- `output/pdf/acme-bare-bones.pdf`: introductory graph with observed K and no intermediates.
+- `output/pdf/acme-dag.pdf`: expanded graph for inspection or reuse.
 
 `figures/acme-dag.pdf` is the generated figure included by the document. Build
 logs, generated TeX, and Graphviz layout JSON go to `../tmp/pdfs/acme-dag`.
 All generated files are ignored by Git; retain the DOT, QMD, and build script.
-Rebuild only the graph with `python3 ckmr_dags/build_ckmr_dags.py`.
+Rebuild only the graphs with `python3 ckmr_dags/build_ckmr_dags.py`.
 
-## Conventions and assumptions
+## Expanded graph conventions and assumptions
 
 - Light blue fill and double outlines: pair-member covariates conditioned upon.
 - Gray fill: other observed quantities. White: unobserved. This does not imply conditional

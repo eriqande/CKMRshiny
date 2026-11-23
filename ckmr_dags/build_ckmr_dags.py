@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the external Acme DAG with Graphviz, dot2tex, and LaTeX.
+"""Build external CKMR DAGs with Graphviz, dot2tex, and LaTeX.
 
 Requires Python's standard library, dot, dot2tex, and pdflatex with TikZ.
 Run from any directory; --document also renders the PDF Quarto walkthrough.
@@ -23,25 +23,27 @@ def command(name):
     return path
 
 
-def make_figure():
-    """Compile DOT through dot2tex; verify the requested top-row ordering."""
-    WORK.mkdir(parents=True, exist_ok=True)
-    (WORK / ".gitignore").write_text("*\n")
-    layout = subprocess.run([command("dot"), "-Tjson", str(ROOT / "dot/acme.dot")],
+def make_figure(source):
+    """Compile one DOT source; preserve the Acme covariate row ordering."""
+    stem = "acme-dag" if source.stem == "acme" else source.stem
+    work = WORK / source.stem
+    work.mkdir(parents=True, exist_ok=True)
+    (work / ".gitignore").write_text("*\n")
+    layout = subprocess.run([command("dot"), "-Tjson", str(source)],
                             check=True, capture_output=True, text=True)
-    (WORK / "acme-layout.json").write_text(layout.stdout)
+    (work / f"{stem}-layout.json").write_text(layout.stdout)
     nodes = {n["name"]: n for n in json.loads(layout.stdout)["objects"] if "pos" in n}
-    row = [list(map(float, nodes[k]["pos"].split(",")))
-           for k in ("Aju", "Yju", "Aad", "Yad")]
+    row_names = ("Aju", "Sju", "Aad", "Sad") if "Sju" in nodes else ("Aju", "Yju", "Aad", "Yad")
+    row = [list(map(float, nodes[k]["pos"].split(","))) for k in row_names]
     assert max(p[1] for p in row) - min(p[1] for p in row) < .01
     assert all(row[i][0] < row[i+1][0] for i in range(3))
-    picture = WORK / "acme-picture.tex"
+    picture = work / f"{stem}-picture.tex"
     subprocess.run([command("dot2tex"), "--format", "tikz", "--figonly",
                     "--nodeoptions", r"minimum size=51.84bp,inner sep=0pt,font=\large",
-                    "--output", str(picture), str(ROOT / "dot/acme.dot")], check=True)
+                    "--output", str(picture), str(source)], check=True)
     # dot2tex emits 'filled' when fill and stroke colors match. Define that
     # shorthand explicitly rather than changing the generated TikZ by hand.
-    tex = WORK / "acme-dag.tex"
+    tex = work / f"{stem}.tex"
     tex.write_text(r"""\documentclass[tikz,border=9pt]{standalone}
 \usepackage{amsmath,amssymb,lmodern}
 \usetikzlibrary{arrows.meta,shapes.geometric}
@@ -49,27 +51,29 @@ def make_figure():
 \begin{document}
 """ + picture.read_text() + "\n\\end{document}\n")
     proc = subprocess.run([command("pdflatex"), "-interaction=nonstopmode", "-halt-on-error",
-                           f"-output-directory={WORK}", str(tex)], cwd=ROOT,
+                           f"-output-directory={work}", str(tex)], cwd=ROOT,
                           capture_output=True, text=True)
-    (WORK / "figure-build.log").write_text(proc.stdout + proc.stderr)
+    (work / "figure-build.log").write_text(proc.stdout + proc.stderr)
     if proc.returncode:
-        raise SystemExit(f"LaTeX figure failed; see {WORK / 'figure-build.log'}")
+        raise SystemExit(f"LaTeX figure failed; see {work / 'figure-build.log'}")
     for directory in (ROOT / "figures", ROOT / "output/pdf"):
         directory.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(WORK / "acme-dag.pdf", directory / "acme-dag.pdf")
-    print(ROOT / "output/pdf/acme-dag.pdf")
+        shutil.copyfile(work / f"{stem}.pdf", directory / f"{stem}.pdf")
+    print(ROOT / "output/pdf" / f"{stem}.pdf")
+    return ROOT / "figures" / f"{stem}.pdf"
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--document", action="store_true")
     args = parser.parse_args()
-    make_figure()
+    figures = [make_figure(source) for source in sorted((ROOT / "dot").glob("*.dot"))]
     if args.document:
         subprocess.run([command("quarto"), "render", "ckmr_dags.qmd", "--to", "pdf",
                         "--output-dir", "output/pdf"], cwd=ROOT, check=True)
-        # Quarto refreshes its output directory; restore the standalone figure.
-        shutil.copyfile(ROOT / "figures/acme-dag.pdf", ROOT / "output/pdf/acme-dag.pdf")
+        # Quarto refreshes its output directory; restore the standalone figures.
+        for figure in figures:
+            shutil.copyfile(figure, ROOT / "output/pdf" / figure.name)
 
 
 if __name__ == "__main__":
