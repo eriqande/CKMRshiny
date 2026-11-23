@@ -1,5 +1,7 @@
 ---
-title-meta: "Acme Archipelago: a DAG for one candidate pair"
+title: "Acyclic directed graph (DAG) representations of  
+pairwise CKMR probabilities"
+author: "Eric C. Anderson"
 format:
   pdf:
     documentclass: article
@@ -18,14 +20,32 @@ execute:
   message: false
 ---
 
-\begin{center}
-{\Large\bfseries Acme Archipelago: a DAG for one candidate pair\par}
-\vspace{0.4em}
-{\normalsize Known ages, equal reproduction, and lethal sampling\par}
-\end{center}
 \newcommand{\Ju}{\mathrm{Ju}}
 \newcommand{\Ad}{\mathrm{Ad}}
 
+# Introduction
+
+A graph is a set of vertices (also called nodes) and edges that connect
+(some of) the vertices.  They have applications in a number of fields.
+Acyclic directed graphs (abbreviated DAGs) are one special type of graph
+in which the edges are directed---they are drawn as arrows that start at one 
+vertex and end at another.  If an arrow extends from node $A$ to node $C$ and
+from node $B$ to node $C$, then $A$ and $B$ are referred to as _parents_ of
+$C$, and $C$ is called a _daughter_ of nodes $A$ and $B$.  (Note that
+these terms are completely separate from the parent-offspring relatinships we
+deal with in CKMR!).  
+
+In statistics, DAGs are particularly useful because if a joint probability
+distribution can be factorized into a product of conditional probabilities,
+then that factorization can be reprsented as a DAG.  Quite simply, if each
+variable involved in the joint probability is associated with a vertex, 
+then the factorization of the joint probability can be described as a product
+over vertices of the conditional probability of each vertex given its parents.
+Representing a joint distribution in that manner provides access to a variety
+of graphical interpretations and algorithms which can serve to make calculations
+such as conditioning on observed values or marginalization efficient
+(for a somewhat baroque example of this in the inference of pedigrees from
+genetic data, see )
 
 We consider two distinct, sampled females: a _candidate offspring_, denoted
 by the subscript $\mathrm{Ju}$, and a _candidate mother_, denoted by subscript
