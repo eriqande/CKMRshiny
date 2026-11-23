@@ -147,7 +147,8 @@ is no randomness involved: they are deterministic quantities determined
 by their parents in the DAG. We can think of them as degenerate random variables,
 and when we insert them into the DAG we make their node markers have dashed lines.
 We also introduce some colors to the DAG to be more explicit about parameters,
-covariates, and "observed data."  
+covariates, and "observed data," and we introduce a very simple error model for
+the kinship assignment.
 
 ![A single-pair model for the Acme Archipelago represented as an acyclic directed graph (DAG).  See the text for explanation.](figures/acme-dag.pdf){#fig-acme width=70% fig-pos='H'}
 

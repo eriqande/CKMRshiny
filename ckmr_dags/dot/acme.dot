@@ -21,8 +21,8 @@ digraph Acme {
   {rank=same; N0f; lambda; y0; Aat; Amat;}
   N0f -> lambda -> y0 -> Aat -> Amat [style=invis, weight=40];
 
-  Rtot [texlbl="$\mathring{R}_{\mathrm{Tot}}$", kind=dependent, color="#B83E6B", penwidth=1.8];
-  Rad [texlbl="$\mathring{R}_{\mathrm{Ad}}$", kind=latent];
+  Rtot [texlbl="$\mathring{R}_{\mathrm{Tot}}$", kind=dependent, style=dashed, color="#B83E6B", penwidth=1.8];
+  Rad [texlbl="$\mathring{R}_{\mathrm{Ad}}$", kind=latent, style=dashed];
   {rank=same; Rtot; Rad;}
   Rtot -> Rad [style=invis, weight=20];
   K [texlbl="$K$", kind=dependent, color="#B83E6B", penwidth=1.8];
@@ -32,11 +32,11 @@ digraph Acme {
   {rank=same; K; alpha; beta;}
   K -> alpha -> beta [style=invis, weight=30];
 
-  Aju -> Bju [style=dashed];
-  Yju -> Bju [style=dashed];
-  Bju -> Aat [style=dashed];
-  Aad -> Aat [style=dashed];
-  Yad -> Aat [style=dashed];
+  Aju -> Bju;
+  Yju -> Bju;
+  Bju -> Aat;
+  Aad -> Aat;
+  Yad -> Aat;
   Bju -> Rtot;
   N0f -> Rtot;
   lambda -> Rtot;
