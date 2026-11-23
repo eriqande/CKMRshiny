@@ -27,7 +27,7 @@ def make_figure():
     """Compile DOT through dot2tex; verify the requested top-row ordering."""
     WORK.mkdir(parents=True, exist_ok=True)
     (WORK / ".gitignore").write_text("*\n")
-    layout = subprocess.run([command("dot"), "-Tjson", str(ROOT / "acme.dot")],
+    layout = subprocess.run([command("dot"), "-Tjson", str(ROOT / "dot/acme.dot")],
                             check=True, capture_output=True, text=True)
     (WORK / "acme-layout.json").write_text(layout.stdout)
     nodes = {n["name"]: n for n in json.loads(layout.stdout)["objects"] if "pos" in n}
@@ -38,7 +38,7 @@ def make_figure():
     picture = WORK / "acme-picture.tex"
     subprocess.run([command("dot2tex"), "--format", "tikz", "--figonly",
                     "--nodeoptions", r"minimum size=51.84bp,inner sep=0pt,font=\large",
-                    "--output", str(picture), str(ROOT / "acme.dot")], check=True)
+                    "--output", str(picture), str(ROOT / "dot/acme.dot")], check=True)
     # dot2tex emits 'filled' when fill and stroke colors match. Define that
     # shorthand explicitly rather than changing the generated TikZ by hand.
     tex = WORK / "acme-dag.tex"

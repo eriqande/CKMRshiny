@@ -26,7 +26,7 @@ Quarto renders the walkthrough.
 
 The pipeline is deliberately external to Quarto:
 
-1. `acme.dot` defines nodes, edges, LaTeX labels (`texlbl`), colors, and ranks.
+1. `dot/acme.dot` defines nodes, edges, LaTeX labels (`texlbl`), colors, and ranks.
 2. Graphviz selects the layout. The build checks the top-row constraints.
 3. dot2tex generates TikZ, and pdflatex typesets actual LaTeX node labels.
 4. Quarto includes the resulting vector PDF as an ordinary external figure.
