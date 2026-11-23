@@ -113,11 +113,18 @@ known without error from genetic data.  This is a proper DAG and it
 expresses that the probability that the pair is a POP can be written
 as the conditional probability
 $$
-P(K \mid N_{0,f}, \lambda, y_0, A_\mathrm{mat}, A_\Ju, Y_\Ju, A_\Ad, Y_\Ad)
+P(K \mid N_{0,f}, \lambda, y_0, A_\mathrm{mat}, A_\Ju, Y_\Ju, A_\Ad, Y_\Ad).
 $$
 
-The CKMR pseudo-likelihood
-is formed by multiplying these marginal probabilities over all pairs of individuals.
+Wow! That seems singularly unhelpful!  The probability of $K$ depends
+on every covariate and parameter in the model.  Tell me something I
+don't already know!  
+
+In the next section we will elaborate on this initial bare-bones DAG with some
+intermediate variables that I hope will make some of the dependence between
+the variables less opaque.  In the meantime, do note that
+the CKMR pseudo-likelihood
+is formed by multiplying these conditional probabilities over all pairs of individuals.
 It is a pseudolikelihood because those pairs are not necessarily independent, though
 in large populations under sparse sampling, this can be a good approximation.  As
 discussed in the workshop, the product
@@ -125,7 +132,24 @@ over all pairs can be reduced to a product of Poisson probabilities over the
 different combinations of the juvenile and adult covariates upon which the probabilities
 are conditioned (in this case, age and sampling year). 
 
-![A single-pair model for the Acme Archipelago represented as an acyclic directed graph (DAG).  See the text for explanation.](figures/acme-dag.pdf){#fig-acme width=80% fig-pos='H'}
+## A more elaborate DAG
+
+The bare-bones DAG was not particularly helpful: it does very little to elucidate the
+dependence structure between the different variables involved.  In many types of models,
+introducing some latent variables can provide a refined picture of the
+dependence structure (for example, a latent indicator variable in a mixture model).
+The calculation of CKMR probabilities is similar. By introducing intermediate
+variables or quantities to the DAG, the picture of the dependence structure becomes
+more refined.  In the following DAG, we add additional nodes that refine the
+dependence structure of the model.  Interestingly, some of these nodes are better
+considered "intermediate quantities" rather than "latent variables" because there
+is no randomness involved: they are deterministic quantities determined
+by their parents in the DAG. We can think of them as degenerate random variables,
+and when we insert them into the DAG we make their node markers have dashed lines.
+We also introduce some colors to the DAG to be more explicit about parameters,
+covariates, and "observed data."  
+
+![A single-pair model for the Acme Archipelago represented as an acyclic directed graph (DAG).  See the text for explanation.](figures/acme-dag.pdf){#fig-acme width=70% fig-pos='H'}
 
 In the DAG above, light blue fill and double outlines identify the pair-member
 covariates upon which we condition. Other observed circular nodes have gray fill;
