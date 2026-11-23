@@ -45,14 +45,15 @@ Rebuild only the graph with `python3 ckmr_dags/build_ckmr_dags.py`.
 
 ## Conventions and assumptions
 
-- Gray fill: observed. White: unobserved. This does not imply conditional
+- Light blue fill and double outlines: pair-member covariates conditioned upon.
+- Gray fill: other observed quantities. White: unobserved. This does not imply conditional
   randomness: both reproductive-output nodes are deterministic in this model.
 - Dark pink fill: estimated parameters `N_{0,f}` and `lambda`.
 - Pink outline: a value or conditional law depends on the parameter vector.
   In particular, the observed value of `K*` stays fixed even though its
   conditional probability depends on parameters.
 - Dashed outline/incoming arrows: data-only bookkeeping intermediates.
-- Diamonds: supplied constants or modeling choices (`y0`, maturity age,
+- Light blue diamonds: supplied constants or modeling choices (`y0`, maturity age,
   false-positive rate `alpha`, and false-negative rate `beta`).
 
 The aim is to keep alpha effectively zero. Mark's Acme example takes both

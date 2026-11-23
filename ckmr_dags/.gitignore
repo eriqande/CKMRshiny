@@ -3,6 +3,6 @@ output/
 figures/*.pdf
 *.knit.md
 *.utf8.md
-
 /.quarto/
 **/*.quarto_ipynb
+ckmr_dags.pdf

@@ -43,7 +43,8 @@ are conditioned (in this case, age and sampling year).
 
 ![A single-pair model for the Acme Archipelago represented as an acyclic directed graph (DAG).  See the text for explanation.](figures/acme-dag.pdf){#fig-acme width=80% fig-pos='H'}
 
-In the DAG above, circular nodes shaded with gray fill denote observed quantities;
+In the DAG above, light blue fill and double outlines identify the pair-member
+covariates upon which we condition. Other observed circular nodes have gray fill;
 the unshaded circular nodes are unobserved variables. Dark pink fill denotes a parameter to be estimated. Nodes with pink outlines mark
 quantities whose values (or the conditional distributions of those values) depend
 on the parameter values.
@@ -54,7 +55,7 @@ _bookkeeping intermediates_. These are values that can be deterministically
 determined by the observed covariates and, hence, could be removed from the model
 specification; however I find that explicitly including them provides a helpful
 reminder of what they are, and representing them explicitly might become useful
-later when covariates are uncertain.  Shaded gray diamonds denote fixed inputs or modeling choices.
+later when covariates are uncertain.  Light blue diamonds denote fixed inputs or modeling choices.
 
 
 # What each node means
