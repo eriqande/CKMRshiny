@@ -66,7 +66,7 @@ def main():
     args = parser.parse_args()
     make_figure()
     if args.document:
-        subprocess.run([command("quarto"), "render", "acme.qmd", "--to", "pdf",
+        subprocess.run([command("quarto"), "render", "ckmr_dags.qmd", "--to", "pdf",
                         "--output-dir", "output/pdf"], cwd=ROOT, check=True)
         # Quarto refreshes its output directory; restore the standalone figure.
         shutil.copyfile(ROOT / "figures/acme-dag.pdf", ROOT / "output/pdf/acme-dag.pdf")

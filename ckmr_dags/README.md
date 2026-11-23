@@ -1,6 +1,7 @@
-# CKMR DAGs: Acme Archipelago
+# CKMR DAGs
 
-Start with `acme.qmd`. It describes one candidate mother-offspring pair in the
+Start with `ckmr_dags.qmd`, the growing document for DAGs across course examples.
+Its first example describes one candidate mother-offspring pair in the
 female-only Acme model: observed ages/years, deterministic birth-year and
 age-at-birth bookkeeping, focal and total expected reproductive outputs, true
 kinship, and detected kinship. The two reproductive-output nodes stay visible.
@@ -14,7 +15,7 @@ model edges. Sex is conditioned on being female and is not another node.
 From the repository root, with the base environment active:
 
 ```sh
-python3 ckmr_dags/build_acme.py --document
+python3 ckmr_dags/build_ckmr_dags.py --document
 ```
 
 Requirements: Python 3, Graphviz (`dot`), `dot2tex`, a LaTeX installation with
@@ -34,13 +35,13 @@ There is no fenced `dot` block. The generated TikZ is not edited by hand.
 
 Outputs:
 
-- `output/pdf/acme.pdf`: walkthrough, factorization, marginalization, and R code.
+- `output/pdf/ckmr_dags.pdf`: walkthrough, factorization, marginalization, and R code.
 - `output/pdf/acme-dag.pdf`: standalone graph for inspection or reuse.
 
 `figures/acme-dag.pdf` is the generated figure included by the document. Build
 logs, generated TeX, and Graphviz layout JSON go to `../tmp/pdfs/acme-dag`.
 All generated files are ignored by Git; retain the DOT, QMD, and build script.
-Rebuild only the graph with `python3 ckmr_dags/build_acme.py`.
+Rebuild only the graph with `python3 ckmr_dags/build_ckmr_dags.py`.
 
 ## Conventions and assumptions
 
