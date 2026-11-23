@@ -2,6 +2,7 @@
 title: "Acyclic directed graph (DAG) representations of  
 pairwise CKMR probabilities"
 author: "Eric C. Anderson"
+bibliography: citations.bib
 format:
   pdf:
     documentclass: article
@@ -10,6 +11,7 @@ format:
     fontsize: 11pt
     geometry: margin=0.8in
     colorlinks: true
+    toc: true
     keep-tex: false
     include-in-header:
       text: |
@@ -43,15 +45,63 @@ then the factorization of the joint probability can be described as a product
 over vertices of the conditional probability of each vertex given its parents.
 Representing a joint distribution in that manner provides access to a variety
 of graphical interpretations and algorithms which can serve to make calculations
-such as conditioning on observed values or marginalization efficient
-(for a somewhat baroque example of this in the inference of pedigrees from
-genetic data, see )
+such as conditioning on observed values or marginalization efficient.
+(For a somewhat baroque example of this in the inference of pedigrees from
+genetic data, see @anderson2016bayesian).  The DAG representation also
+provides a compact visual overview of the variables in the joint probability
+distribuion (i.e., the "model") and their relationships with one another. Such
+a visual representation can be useful for understanding and comparing the
+structure of different models.  
+
+I have found DAGs (and other graphical flavors) to be fascinating and helpful 
+since I was a
+graduate student.  Some years ago I had written up a short exploration of how
+useful it could be (at least for me!) to represent CKMR pseudo-likelihoods
+via DAGs.  In that case, I was merely trying to understand the calculations
+made to account for uncertainty in the paternal or maternal nature of
+half-sibling relationships due to limited mtDNA variation in a population.
+During the workshop in Hawaii, I found myself wanting to resurrect some of that
+early exploration to provide a simple visual language to describe the
+CKMR models that we encountered.  Especially since Mark's series of example
+CKMR scenarios (Acme Archipelago, Sanctuary Sound, etc.) build upon one another
+in complexity, I thought it might be particularly useful to be able to
+depict each of those elaborations in DAG form.  This document contains
+my attempt to do so.
+
+I have found the process of thinking through a good DAG representation
+for the various examples we treated during the course to be helpful in
+solidifying many of the concepts of CKMR, and to also provide a visual
+way to suggest future extensions.  I know everyone brings their own mental
+tools to the understanding of mathematical material.  For some, the following
+diagrams might not provide additional insight---or they may even serve to
+further confuse the reader!  In such cases I offer my sincere apologies.
+I hope, however, that for some of you, the following will provide
+a helpful way of visualizing and summarizing the models we encountered.
+
+
+# The Acme Archipelago
+
+This scenario was the first and simplest one we encountered---estimating
+an initial number of females, $N_{0,f}$ and a population growth rate
+$\lambda$ using parent offspring pairs from samples with perfectly known ages.  
 
 We consider two distinct, sampled females: a _candidate offspring_, denoted
 by the subscript $\mathrm{Ju}$, and a _candidate mother_, denoted by subscript
 $\mathrm{Ad}$. These are roles in a comparison: the candidate offspring may
 be an adult when sampled, but is called the "juvenile" when being compared as
-a candidate offspring. The graph represents the marginal probability
+a candidate offspring.  The females are assumed to become mature when they
+reach the age $A_\mathrm{mat}$. 
+
+## A bare-bones DAG
+
+We start with a very simple DAG to express the conditional probability
+that an Ad-Ju pair is a parent-offspring pair given their ages ($A_\Ad$,$A_\Ju$)
+and their sampling years ($S_\Ad$, $S_\Ju$).  Included in the DAG is a reference
+year $y_0$ that the initial population size corresponds to.
+
+
+
+The graph represents the marginal probability
 of one pair of individuals, _conditioned on their ages and sampling years_.  The CKMR pseudo-likelihood
 is formed by multiplying these marginal probabilities over all pairs of individuals.
 It is a pseudolikelihood because those pairs are not necessarily independent, though
