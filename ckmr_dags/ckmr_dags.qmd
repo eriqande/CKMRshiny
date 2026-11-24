@@ -426,9 +426,27 @@ terms of DAGs does also.
 
 # Sanctuary Sound
 
+Sanctuary Sound adds some new elements to the basic Acme Archipelago scenario:
+
+1. Sampling is not lethal (apart from a few botched releases).
+2. Sampling is length-selective (smaller individuals are preferentially caught)
+3. Age is unknown for the individuals, but length is recorded for the sampled dolphins.
+
+The first thing we are going to do is expand the DAG from Acme Archipelago that
+incorporates points 1 and 2, above, but we will assume that age is known
+(i.e., we are making a DAG of the "ideal" case).  With sampling being non-lethal,
+we now must account for the possibility that an offspring was born after the adult
+was sampled, so we incorporate $p$, the annual probability of survival.  We also
+will include length, $L$ as a variable in the model, and related to that we will
+include $C$ which indicates whether the individual was sampled, i.e., **C**aught.
+We do the latter to have a graphical depiction of the length-selective sampling.
+
+
+
+
 We now get to a scenario that involves summing over some intermediate
 latent variables, and here is a place I find that DAG visualizations can
-be quite helpful.  In order to prepare ourselves for the this lovely utility, it serves
+be quite helpful.  In order to prepare ourselves for this lovely utility, it serves
 to review some simple rules of probability and their correspondences in DAG form.
 
 # Citations
