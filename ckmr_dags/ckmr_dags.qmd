@@ -158,7 +158,7 @@ $K^*$ is the _observed_ relationship of the pair, which might differ from the tr
 relationship.  Dark pink fill denotes a parameter to be estimated. Nodes with pink outlines mark
 quantities whose values (or the conditional distributions of those values) depend
 on the parameter values. These are values that must be recalculated
-during separate computations of the pseudo-log-likelihood during optimization.
+during separate computations of the pseudo-loglikelihood during optimization.
 As noted above, dashed nodes identify the added _intermediate quantities_. These values
 can be calculated deterministically from their parents and, hence,
 could be removed from the model specification; however including them
@@ -281,6 +281,20 @@ P(K = 1) =
 \frac{\mathring{R}_\Ad}{\mathring{R}_\Tot}.
 $$
 
+Let us pause here for a moment to take this in a second time and say it
+even more bluntly: the process of calculating the kinship probabilities
+in CKMR boils down to calculating $P(\mathring{R}_\Ad\mid\cdots)$ and
+$P(\mathring{R}_\mathrm{Tot}\mid\cdots)$, where we are conditioning on "$\cdots$"
+which is standing in here to mean _all the covariates, parameter values,
+fixed inputs, and modelling choices that we are conditioning upon_.  Calculating
+these conditional probabilities with ideal data can be quite simple.  In cases
+with uncertainty in the conditioning covariates, or when there are intervening latent
+variables that must be summed over, the calculation can become more complex.  Whether
+simple or complex, however, I hope that our little journey through these DAGs for CKMR
+conditional probabilities will bring a useful perspective to the process of formulating
+these CKMR models and calculating the conditional probabilities therein.
+
+
 $K^*$ is the recorded/detected mother-offspring classification.  We denote the
 false positive rate by $\alpha$ and the false negative rate by $\beta$.
 These are fixed inputs, not parameters estimated by the likelihood. We generally aim to make 
@@ -373,8 +387,9 @@ The DAG for this situation appears below.
 ![A DAG for Bilateral Bay, extending the Acme model with handedness covariates and inheritance parameters.](figures/bilateral-bay.pdf){#fig-bilateral-bay width=95% fig-pos='H'}
 
 Looking at the DAG, we see that the conditional probability of $K$ can be calculated,
-as before, by $\mathring{R}_\mathrm{Ad}$ divided by $\mathring{R}_\mathrm{Tot}$.  We use
-"$\cdots$" to mean "conditioned on all the covariates."  By reading from the graph we
+as before, by $\mathring{R}_\mathrm{Ad}$ divided by $\mathring{R}_\mathrm{Tot}$.  We again use
+"$\cdots$" to mean "conditioned on all the covariates, parameters, fixed inputs, and
+modeling choices."  By reading from the graph we
 know that the variables/parameters, from left to right, that must appear in
 $P(\mathring{R}_\mathrm{Tot}\mid \cdots)$ are: $N_{0,f}$, $\lambda$, $y_0$, $B_\Ju$, $H_\Ju$ and
 $P_L$.  These are the expected relative numbers of female offspring of the different
@@ -413,7 +428,7 @@ terms of DAGs does also.
 
 We now get to a scenario that involves summing over some intermediate
 latent variables, and here is a place I find that DAG visualizations can
-be quite helpful.  In order to prepare ourselves for the this utility, it serves
+be quite helpful.  In order to prepare ourselves for the this lovely utility, it serves
 to review some simple rules of probability and their correspondences in DAG form.
 
 # Citations
