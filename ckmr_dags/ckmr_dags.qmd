@@ -1,6 +1,5 @@
 ---
-title: "Acyclic directed graph (DAG) representations of  
-pairwise CKMR probabilities"
+title: "Acyclic directed graph (DAG) representations of pairwise CKMR probabilities"
 author: "Eric C. Anderson"
 bibliography: citations.bib
 format:
@@ -344,7 +343,7 @@ the model (at least to make it easier to see how the different models relate).
 
 # Bilateral Bay
 
-In Bilateral Bay, there are two morphs Left-handed and Right-handed.  From other
+In Bilateral Bay, there are two morphs: Left-handed and Right-handed.  From other
 sources of data (strandings and gill nets) it appears that the frequency of these
 two morphs vary in different populations; however, it can be assumed that their
 frequency is at an equilibrium.  Handedness does not affect fecundity or survival,
@@ -360,9 +359,9 @@ an offspring has handedness $H_\Ju$ given that its parent had handedness $H_\Ad$
 These rates are specified by the parameters $P_{L|L}$, the probability that a
 mother that is L produces a daughter that is L, and $P_{R|R}$, the probability that a
 mother that is R produces a daughter that is R.  Assuming an equilibrium between these
-two rates, the frequncy of left-handed dolphins in the population is
+two rates, the frequency of Left-handed dolphins in the Bilateral Bay population can be calculated to be:
 $$
-P_L = \frac{1 - P_{R|R}}{2 - P_{L|L} - P_{R|R}}
+P_L = \frac{1 - P_{R|R}}{2 - P_{L|L} - P_{R|R}}.
 $$
 
 The probability of sampling an individual is affected only by handedness
@@ -371,4 +370,51 @@ so we don't have to worry further about the sampling.
 
 The DAG for this situation appears below.
 
+![A DAG for Bilateral Bay, extending the Acme model with handedness covariates and inheritance parameters.](figures/bilateral-bay.pdf){#fig-bilateral-bay width=95% fig-pos='H'}
+
+Looking at the DAG, we see that the conditional probability of $K$ can be calculated,
+as before, by $\mathring{R}_\mathrm{Ad}$ divided by $\mathring{R}_\mathrm{Tot}$.  We use
+"$\cdots$" to mean "conditioned on all the covariates."  By reading from the graph we
+know that the variables/parameters, from left to right, that must appear in
+$P(\mathring{R}_\mathrm{Tot}\mid \cdots)$ are: $N_{0,f}$, $\lambda$, $y_0$, $B_\Ju$, $H_\Ju$ and
+$P_L$.  These are the expected relative numbers of female offspring of the different
+handednesses, and it must clearly be:
+$$
+P(\mathring{R}_\mathrm{Tot}\mid \cdots) = N_{0,f}\exp\{\lambda(B_{\mathrm{Ju}}-y_0)\}
+\times
+\begin{cases}
+P_L \qquad & \mbox{if} \qquad H_\Ju = \mbox{Left-handed} \\
+1 - P_L \qquad &\mbox{if} \qquad H_\Ju = \mbox{Right-handed}.
+\end{cases}
+$$
+This is clear, because $N_{0,f}\exp\{\lambda(B_{\mathrm{Ju}}-y_0)\}$ is the expected
+relative _total_ output of females at time $B_\Ju$, with a fraction $P_L$ of that
+total being Left-handed offspring, and a fraction $1 - P_L$ being Right-handed
+offspring.
+
+The variables involved in the conditional probability $P(\mathring{R}_\Ad\mid \cdots)$
+can similarly be read from the graph.  Left to right they are: $B_\Ju$, $P_{L|L}$,
+$P_{R|R}$, $H_\Ju$, $\mathring{A}_\Ad$, $A_\mathrm{mat}$, $Y_\Ad$, $H_\Ad$.  We clearly
+must have:
+$$
+P(\mathring{R}_\Ad\mid \cdots) = 1\{\mathring{A}_\Ad \geq A_\mathrm{mat}\} 1\{Y_\Ad \geq B_\Ju\}
+\times
+\begin{cases}
+P_{L|L}&\mbox{if}~~H_\Ad = \mbox{LH},~~H_\Ju = \mbox{LH}  \\
+1 - P_{L|L}&\mbox{if}~~H_\Ad = \mbox{LH},~~H_\Ju = \mbox{RH} \\
+P_{R|R}&\mbox{if}~~H_\Ad = \mbox{RH},~~H_\Ju = \mbox{RH}  \\
+1 - P_{R|R}&\mbox{if}~~H_\Ad = \mbox{RH},~~H_\Ju = \mbox{LH}.
+\end{cases}
+$$
+Good! I find that pretty clear, and I hope anyone else that likes to think in
+terms of DAGs does also.
+
+# Sanctuary Sound
+
+We now get to a scenario that involves summing over some intermediate
+latent variables, and here is a place I find that DAG visualizations can
+be quite helpful.  In order to prepare ourselves for the this utility, it serves
+to review some simple rules of probability and their correspondences in DAG form.
+
+# Citations
 
