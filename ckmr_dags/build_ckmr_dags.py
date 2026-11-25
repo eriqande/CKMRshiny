@@ -2,7 +2,8 @@
 """Build external CKMR DAGs with Graphviz, dot2tex, and LaTeX.
 
 Requires Python's standard library, dot, dot2tex, and pdflatex with TikZ.
-Run from any directory; --document also renders the PDF Quarto walkthrough.
+Run from any directory; every dot/*.dot source (including -no-kstar variants)
+is built. --document also renders the PDF Quarto walkthrough.
 Generated TeX, layout JSON and logs stay in ../tmp/pdfs/acme-dag.
 """
 import argparse

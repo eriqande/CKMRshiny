@@ -1,0 +1,42 @@
+// Introductory variant: K is observed; the detection layer is omitted.
+// Minimal conditional model: all bookkeeping and reproductive-output nodes
+// have been substituted out. Invisible edges constrain layout, not the model.
+digraph AcmeBareBonesNoKstar {
+  graph [rankdir=TB, nodesep=0.40, ranksep=0.70, splines=spline, bgcolor=white];
+  node [shape=circle, fixedsize=true, width=0.72, height=0.72, label="", fontsize=12, color="#48535B", penwidth=1.1];
+  edge [arrowsize=0.65, color="#48535B", penwidth=1.0];
+
+  Aju [texlbl="$A_{\mathrm{Ju}}$", style=filled, fillcolor="#EBEDEF"];
+  Sju [texlbl="$S_{\mathrm{Ju}}$", style=filled, fillcolor="#EBEDEF"];
+  Aad [texlbl="$A_{\mathrm{Ad}}$", style=filled, fillcolor="#EBEDEF"];
+  Sad [texlbl="$S_{\mathrm{Ad}}$", style=filled, fillcolor="#EBEDEF"];
+  // Invisible alignment anchors reserve a left-hand column for fitted inputs.
+  p0 [shape=point, style=invis, width=0, height=0];
+  p1 [shape=point, style=invis, width=0, height=0];
+  p2 [shape=point, style=invis, width=0, height=0];
+  {rank=same; p0; p1; p2; Aju; Sju; Aad; Sad;}
+  p0 -> p1 -> p2 -> Aju [style=invis, weight=100];
+  p0 -> N0f [style=invis, weight=100];
+  p1 -> lambda [style=invis, weight=100];
+  p2 -> y0 [style=invis, weight=100];
+  Aju -> Sju -> Aad -> Sad [style=invis, weight=100];
+
+  N0f [texlbl="$N_{0,f}$"];
+  lambda [texlbl="$\lambda$"];
+  y0 [texlbl="$y_0$", shape=diamond, style=filled, fillcolor="#EBEDEF", width=0.56, height=0.56];
+  Amat [texlbl="$A_{\mathrm{mat}}$", shape=diamond, style=filled, fillcolor="#EBEDEF", width=0.72, height=0.58];
+  {rank=same; N0f; lambda; y0; Amat;}
+  N0f -> lambda -> y0 -> Amat [style=invis, weight=40];
+  Sad -> Amat [style=invis, weight=100]; // keep parameters/constants below the covariate row
+
+  K [texlbl="$K$", style=filled, fillcolor="#EBEDEF"];
+
+  Aju -> K;
+  Sju -> K;
+  Aad -> K;
+  Sad -> K;
+  N0f -> K;
+  lambda -> K;
+  y0 -> K;
+  Amat -> K;
+}

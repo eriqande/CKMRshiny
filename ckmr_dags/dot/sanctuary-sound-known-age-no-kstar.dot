@@ -1,0 +1,63 @@
+// Introductory variant: K is observed; the detection layer is omitted.
+// Graphviz lays out the graph; dot2tex/TikZ typeset every texlbl with LaTeX.
+// Invisible edges constrain ordering and are NOT part of the probabilistic DAG.
+digraph SanctuarySoundKnownAgeNoKstar {
+  graph [rankdir=TB, nodesep=0.38, ranksep=0.52, splines=spline, bgcolor=white];
+  node [shape=circle, fixedsize=true, width=0.72, height=0.72, label="", fontsize=12, color="#48535B", penwidth=1.1];
+  edge [arrowsize=0.65, color="#48535B", penwidth=1.0];
+
+  Aju [group=ju_length, texlbl="$A_{\mathrm{Ju}}$", kind=observed, shape=doublecircle, style=filled, fillcolor="#DDEEF8", peripheries=2];
+  Yju [texlbl="$Y_{\mathrm{Ju}}$", kind=observed, shape=doublecircle, style=filled, fillcolor="#DDEEF8", peripheries=2];
+  Aad [group=ad_length, texlbl="$A_{\mathrm{Ad}}$", kind=observed, shape=doublecircle, style=filled, fillcolor="#DDEEF8", peripheries=2];
+  Yad [texlbl="$Y_{\mathrm{Ad}}$", kind=observed, shape=doublecircle, style=filled, fillcolor="#DDEEF8", peripheries=2];
+  {rank=same; Aju; Yju; Aad; Yad;}
+  Aju -> Yju -> Aad -> Yad [style=invis, weight=100];
+
+  Lju [texlbl="$L_{\mathrm{Ju}}$", group=ju_length, kind=observed, shape=doublecircle, style=filled, fillcolor="#DDEEF8", peripheries=2];
+  Cju [texlbl="$C_{\mathrm{Ju}}$", group=ju_length, kind=observed, shape=doublecircle, style=filled, fillcolor="#DDEEF8", peripheries=2];
+  Lad [texlbl="$L_{\mathrm{Ad}}$", group=ad_length, kind=observed, shape=doublecircle, style=filled, fillcolor="#DDEEF8", peripheries=2];
+  Cad [texlbl="$C_{\mathrm{Ad}}$", group=ad_length, kind=observed, shape=doublecircle, style=filled, fillcolor="#DDEEF8", peripheries=2];
+
+  Bju [texlbl="$B_{\mathrm{Ju}}$", kind=bookkeeping, style=dashed];
+  // Lay out the observation chains before the demographic calculations:
+  // age/year = rank 0; length = rank 1; capture and birth year = rank 2.
+  // Bju -> Aat then places the shared parameter/fixed-input row at rank 3.
+  {rank=same; Lju; Lad;}
+  {rank=same; Cju; Bju; Cad;}
+  Aat [texlbl="$\mathring{A}_{\mathrm{Ad}}$", kind=bookkeeping, style=dashed];
+  N0f [texlbl="$N_{0,f}$", kind=parameter, style=filled, color="#B83E6B", fillcolor="#B83E6B", lblstyle="text=white"];
+  lambda [texlbl="$\lambda$", kind=parameter, style=filled, color="#B83E6B", fillcolor="#B83E6B", lblstyle="text=white"];
+  y0 [texlbl="$y_0$", kind=fixed, shape=diamond, style=filled, width=0.56, height=0.56, fillcolor="#DDEEF8"];
+  Amat [texlbl="$A_{\mathrm{mat}}$", kind=fixed, shape=diamond, style=filled, width=0.72, height=0.58, fillcolor="#DDEEF8"];
+  p [texlbl="$p$", kind=parameter, style=filled, color="#B83E6B", fillcolor="#B83E6B", lblstyle="text=white"];
+  {rank=same; N0f; lambda; y0; p; Aat; Amat;}
+  N0f -> lambda -> y0 -> p -> Aat -> Amat [style=invis, weight=40];
+
+  Rtot [texlbl="$\mathring{R}_{\mathrm{Tot}}$", kind=dependent, style=dashed, color="#B83E6B", penwidth=1.8];
+  Rad [texlbl="$\mathring{R}_{\mathrm{Ad}}$", kind=dependent, style=dashed, color="#B83E6B", penwidth=1.8];
+  {rank=same; Rtot; Rad;}
+  Rtot -> Rad [style=invis, weight=20];
+  K [texlbl="$K$", kind=observed_dependent, color="#B83E6B", penwidth=1.8, style=filled, fillcolor="#EBEDEF"];
+
+  // Length-selective capture; true ages remain observed in this intermediate model.
+  Aju -> Lju [weight=20];
+  Lju -> Cju [weight=20];
+  Aad -> Lad [weight=20];
+  Lad -> Cad [weight=20];
+  p -> Rad;
+  Aju -> Bju [minlen=2];
+  Yju -> Bju [minlen=2];
+  Bju -> Aat;
+  Aad -> Aat;
+  Yad -> Aat;
+  Bju -> Rtot;
+  N0f -> Rtot;
+  lambda -> Rtot;
+  y0 -> Rtot;
+  Aat -> Rad;
+  Yad -> Rad;
+  Bju -> Rad;
+  Amat -> Rad;
+  Rtot -> K;
+  Rad -> K;
+}

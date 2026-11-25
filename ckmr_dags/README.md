@@ -44,6 +44,14 @@ logs, generated TeX, and Graphviz layout JSON go to `../tmp/pdfs/acme-dag`.
 All generated files are ignored by Git; retain the DOT, QMD, and build script.
 Rebuild only the graphs with `python3 ckmr_dags/build_ckmr_dags.py`.
 
+Each original graph also has an editable `-no-kstar.dot` counterpart. These
+omit Kstar, alpha, and beta, and shade K gray to treat kinship as observed.
+All other node/edge conventions are retained. The bare-bones counterpart looks
+the same because that graph already had observed K and no detection layer.
+The build discovers every `dot/*.dot` file, including these variants, and writes
+the matching `figures/<name>.pdf` and `output/pdf/<name>.pdf` (for example,
+`acme-no-kstar.pdf`). Existing QMD figure references are not switched automatically.
+
 ## Expanded graph conventions and assumptions
 
 - Light blue fill and double outlines: pair-member covariates conditioned upon.

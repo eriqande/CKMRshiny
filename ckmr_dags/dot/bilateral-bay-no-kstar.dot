@@ -1,0 +1,60 @@
+// Introductory variant: K is observed; the detection layer is omitted.
+// Graphviz lays out the graph; dot2tex/TikZ typeset every texlbl with LaTeX.
+// Invisible edges constrain ordering and are NOT part of the probabilistic DAG.
+digraph BilateralBayNoKstar {
+  graph [rankdir=TB, nodesep=0.38, ranksep=0.52, splines=spline, bgcolor=white];
+  node [shape=circle, fixedsize=true, width=0.72, height=0.72, label="", fontsize=12, color="#48535B", penwidth=1.1];
+  edge [arrowsize=0.65, color="#48535B", penwidth=1.0];
+
+  Aju [texlbl="$A_{\mathrm{Ju}}$", kind=observed, shape=doublecircle, style=filled, fillcolor="#DDEEF8", peripheries=2];
+  Yju [texlbl="$Y_{\mathrm{Ju}}$", kind=observed, shape=doublecircle, style=filled, fillcolor="#DDEEF8", peripheries=2];
+  Aad [texlbl="$A_{\mathrm{Ad}}$", kind=observed, shape=doublecircle, style=filled, fillcolor="#DDEEF8", peripheries=2];
+  Yad [texlbl="$Y_{\mathrm{Ad}}$", kind=observed, shape=doublecircle, style=filled, fillcolor="#DDEEF8", peripheries=2];
+  Hju [texlbl="$H_{\mathrm{Ju}}$", kind=observed, shape=doublecircle, style=filled, fillcolor="#DDEEF8", peripheries=2];
+  Had [texlbl="$H_{\mathrm{Ad}}$", kind=observed, shape=doublecircle, style=filled, fillcolor="#DDEEF8", peripheries=2];
+  {rank=same; Aju; Yju; Hju; Aad; Yad; Had;}
+  Aju -> Yju -> Hju -> Aad -> Yad -> Had [style=invis, weight=100];
+
+  Bju [texlbl="$B_{\mathrm{Ju}}$", kind=bookkeeping, style=dashed];
+  Aat [texlbl="$\mathring{A}_{\mathrm{Ad}}$", kind=bookkeeping, style=dashed];
+  N0f [texlbl="$N_{0,f}$", kind=parameter, style=filled, color="#B83E6B", fillcolor="#B83E6B", lblstyle="text=white"];
+  lambda [texlbl="$\lambda$", kind=parameter, style=filled, color="#B83E6B", fillcolor="#B83E6B", lblstyle="text=white"];
+  y0 [texlbl="$y_0$", kind=fixed, shape=diamond, style=filled, width=0.56, height=0.56, fillcolor="#DDEEF8"];
+  Amat [texlbl="$A_{\mathrm{mat}}$", kind=fixed, shape=diamond, style=filled, width=0.72, height=0.58, fillcolor="#DDEEF8"];
+  PLL [texlbl="$P_{L\mid L}$", kind=parameter, style=filled, color="#B83E6B", fillcolor="#B83E6B", lblstyle="text=white"];
+  PRR [texlbl="$P_{R\mid R}$", kind=parameter, style=filled, color="#B83E6B", fillcolor="#B83E6B", lblstyle="text=white"];
+  PL [texlbl="$P_L$", kind=dependent, style=dashed, color="#B83E6B", penwidth=1.8];
+  {rank=same; N0f; lambda; y0; PLL; PRR; Aat; Amat;}
+  N0f -> lambda -> y0 -> PLL -> PRR -> Aat -> Amat [style=invis, weight=40];
+
+  Rtot [texlbl="$\mathring{R}_{\mathrm{Tot}}$", kind=dependent, style=dashed, color="#B83E6B", penwidth=1.8];
+  Rad [texlbl="$\mathring{R}_{\mathrm{Ad}}$", kind=dependent, style=dashed, color="#B83E6B", penwidth=1.8];
+  {rank=same; Rtot; Rad;}
+  Rtot -> Rad [style=invis, weight=20];
+  K [texlbl="$K$", kind=observed_dependent, color="#B83E6B", penwidth=1.8, style=filled, fillcolor="#EBEDEF"];
+
+  Aju -> Bju;
+  Yju -> Bju;
+  Bju -> Aat;
+  Aad -> Aat;
+  Yad -> Aat;
+  Bju -> Rtot;
+  N0f -> Rtot;
+  lambda -> Rtot;
+  y0 -> Rtot;
+  Aat -> Rad;
+  Yad -> Rad;
+  Bju -> Rad;
+  Amat -> Rad;
+  // Conditional morph output and its equilibrium population composition.
+  Hju -> Rad;
+  Had -> Rad;
+  Hju -> Rtot;
+  PLL -> PL;
+  PRR -> PL;
+  PLL -> Rad;
+  PRR -> Rad;
+  PL -> Rtot;
+  Rtot -> K;
+  Rad -> K;
+}

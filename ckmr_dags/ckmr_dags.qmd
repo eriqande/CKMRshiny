@@ -34,8 +34,10 @@ in which the edges are directed---they are drawn as arrows that start at one
 vertex and end at another.  If an arrow extends from node $A$ to node $C$ and
 from node $B$ to node $C$, then $A$ and $B$ are referred to as _parents_ of
 $C$, and $C$ is called a _daughter_ of nodes $A$ and $B$.  (Note that
-these terms are completely separate from the parent-offspring relatinships we
-deal with in CKMR!).  
+these terms are completely separate from the parent-offspring relationships we
+deal with in CKMR!).  As the name suggests, there are no directed cycles
+in a DAG.  That means you can't leave a node and follow a series of edges in the
+arrow-direction of each, and get back to the original node.
 
 In statistics, DAGs are particularly useful because if a joint probability
 distribution can be factorized into a product of conditional probabilities,
@@ -68,9 +70,9 @@ in complexity, I thought it might be particularly useful to be able to
 depict each of those elaborations in DAG form.  This document contains
 my attempt to do so.
 
-I have found the process of thinking through a good DAG representation
-for the various examples we treated during the course to
-reinforce the material we covered last week, and it also provides a visual
+I have enjoyed the process of thinking through a good DAG representation
+for the various examples we treated during the course, and find that the
+DAGs provide a nice visual
 way to suggest future extensions.  I know everyone brings their own mental
 tools to the understanding of mathematical material.  For some, the following
 diagrams might not provide additional insight---or they may even serve to
@@ -150,7 +152,7 @@ We also introduce some colors to the DAG to be more explicit about parameters,
 covariates, and "observed data," and we introduce a simple error model for
 the kinship assignment.
 
-![A single-pair model for the Acme Archipelago represented as an acyclic directed graph (DAG) with several added intermediate nodes.  See the text for explanation.](figures/acme-dag.pdf){#fig-acme width=70% fig-pos='H'}
+![A single-pair model for the Acme Archipelago represented as an acyclic directed graph (DAG) with several added intermediate nodes.  See the text for explanation.](figures/acme-no-kstar.pdf){#fig-acme width=70% fig-pos='H'}
 
 In the DAG above, light blue fill and double outlines identify the pair-member
 covariates upon which we condition. The gray fill of the $K^*$ node denotes an observation;
@@ -295,6 +297,57 @@ conditional probabilities will bring a useful perspective to the process of form
 these CKMR models and calculating the conditional probabilities therein.
 
 
+
+### Conditional probabilities implied by the graph
+
+The probability implied by the graph is a product of the conditional
+probabities of each node conditional on its (graph) parents.  Since many of
+the internal nodes are deterministic, we just include the equation there. 
+The hierarchy implied by the DAG is:
+$$
+\begin{aligned}
+B_{\mathrm{Ju}}\mid A_{\mathrm{Ju}},Y_{\mathrm{Ju}}
+  &= Y_\mathrm{Ju}-A_\mathrm{Ju},\\[3pt]
+\mathring A_{\mathrm{Ad}}\mid A_{\mathrm{Ad}},Y_{\mathrm{Ad}},B_{\mathrm{Ju}}
+  &= A_\mathrm{Ad}-(Y_\mathrm{Ad} - B_\mathrm{Ju}),\\[3pt]
+\mathring R_{\mathrm{Ad}}\mid\mathring A_{\mathrm{Ad}},Y_{\mathrm{Ad}},B_{\mathrm{Ju}},A_{\mathrm{mat}}
+  &= 1\{\mathring{A}_\Ad \geq A_\mathrm{mat}\} 1\{Y_\Ad \geq B_\Ju\},\\[3pt]
+\mathring R_{\mathrm{Tot}}\mid N_{0,f},\lambda,B_{\mathrm{Ju}},y_0
+  &=N_{0,f}\exp\{\lambda(B_{\mathrm{Ju}}-y_0)\},\\[3pt]
+K\mid\mathring R_{\mathrm{Ad}},\mathring R_{\mathrm{Tot}}
+  &\sim \operatorname{Bernoulli}\!\left(
+       \frac{\mathring R_{\mathrm{Ad}}}{\mathring R_{\mathrm{Tot}}}\right),\\[3pt]
+\end{aligned}
+$$
+And we can check that the probability of a true POP occurring (i.e., the
+probability of detecting a POP when $\alpha = \beta = 0$) is the familiar
+expression:
+$$
+P(K \mid N_{0,f}, \lambda, y_0, A_\mathrm{mat}, A_\Ju, Y_\Ju, A_\Ad, Y_\Ad) = 
+\frac{1\{\mathring{A}_\Ad \geq A_\mathrm{mat}\} 1\{Y_\Ad \geq B_\Ju\}}
+{N_{0,f}\exp\{\lambda(B_{\mathrm{Ju}}-y_0)\}}.
+$$
+
+Oh Boy! That seems like a lot of work to get to a simple equation that can be described
+and reasoned through in a few sentences.  But, I am hoping that going through that
+arduous and tedious process will have been helpful when we start adding things to
+the model (at least to make it easier to see how the different models relate).
+
+
+## A DAG with uncertainty on the kinship
+
+This is really more of an aside, but I include it here because it turns out to be
+important. Often, the kinship of the pair will not be observed without uncertainty.
+We do everything we can to keep the false positive rate---let us call that
+$\alpha$, to a minimum, low enough that we can confidently call it zero.
+But quite often the false negative rate will be non-zero, and we must include
+that in the CKMR likelihood by modeling the probability of _detecting_ a kin pair,
+rather than of it existing.  This additional layer of complexity can be depicted
+easily in our DAG.  One simple way of doing it is to include $K^*$, which is the
+_observed_ kinship, depending on the true kinship, $K$, as well as $\alpha$ and $\beta$.
+
+![A single-pair model for the Acme Archipelago including uncertainty about the kinship.](figures/acme-dag.pdf){#fig-acme width=70% fig-pos='H'}
+
 $K^*$ is the recorded/detected mother-offspring classification.  We denote the
 false positive rate by $\alpha$ and the false negative rate by $\beta$.
 These are fixed inputs, not parameters estimated by the likelihood. We generally aim to make 
@@ -318,42 +371,11 @@ K^*\mid K,\alpha,\beta
   \sim \operatorname{Bernoulli}(\alpha+(1-\alpha-\beta)K)
 $$
 
-### Conditional probabilities implied by the graph
-
-The probability implied by the graph is a product of the conditional
-probabities of each node conditional on its (graph) parents.  Since many of
-the internal nodes are deterministic, we just include the equation there. 
-The hierarchy implied by the DAG is:
+We have:
 $$
-\begin{aligned}
-B_{\mathrm{Ju}}\mid A_{\mathrm{Ju}},Y_{\mathrm{Ju}}
-  &= Y_\mathrm{Ju}-A_\mathrm{Ju},\\[3pt]
-\mathring A_{\mathrm{Ad}}\mid A_{\mathrm{Ad}},Y_{\mathrm{Ad}},B_{\mathrm{Ju}}
-  &= A_\mathrm{Ad}-(Y_\mathrm{Ad} - B_\mathrm{Ju}),\\[3pt]
-\mathring R_{\mathrm{Ad}}\mid\mathring A_{\mathrm{Ad}},Y_{\mathrm{Ad}},B_{\mathrm{Ju}},A_{\mathrm{mat}}
-  &= 1\{\mathring{A}_\Ad \geq A_\mathrm{mat}\} 1\{Y_\Ad \geq B_\Ju\},\\[3pt]
-\mathring R_{\mathrm{Tot}}\mid N_{0,f},\lambda,B_{\mathrm{Ju}},y_0
-  &=N_{0,f}\exp\{\lambda(B_{\mathrm{Ju}}-y_0)\},\\[3pt]
-K\mid\mathring R_{\mathrm{Ad}},\mathring R_{\mathrm{Tot}}
-  &\sim \operatorname{Bernoulli}\!\left(
-       \frac{\mathring R_{\mathrm{Ad}}}{\mathring R_{\mathrm{Tot}}}\right),\\[3pt]
 K^*\mid K,\alpha,\beta
-  &\sim \operatorname{Bernoulli}\{\alpha+(1-\alpha-\beta)K\}.
-\end{aligned}
+  \sim \operatorname{Bernoulli}\{\alpha+(1-\alpha-\beta)K\}.
 $$
-And we can check that the probability of a true POP occurring (i.e., the
-probability of detecting a POP when $\alpha = \beta = 0$) is the familiar
-expression:
-$$
-P(K \mid N_{0,f}, \lambda, y_0, A_\mathrm{mat}, A_\Ju, Y_\Ju, A_\Ad, Y_\Ad) = 
-\frac{1\{\mathring{A}_\Ad \geq A_\mathrm{mat}\} 1\{Y_\Ad \geq B_\Ju\}}
-{N_{0,f}\exp\{\lambda(B_{\mathrm{Ju}}-y_0)\}}.
-$$
-
-Oh Boy! That seems like a lot of work to get to a simple equation that can be described
-and reasoned through in a few sentences.  But, I am hoping that going through that
-arduous and tedious process will have been helpful when we start adding things to
-the model (at least to make it easier to see how the different models relate).
 
 # Bilateral Bay
 
@@ -384,7 +406,7 @@ so we don't have to worry further about the sampling.
 
 The DAG for this situation appears below.
 
-![A DAG for Bilateral Bay, extending the Acme model with handedness covariates and inheritance parameters.](figures/bilateral-bay.pdf){#fig-bilateral-bay width=95% fig-pos='H'}
+![A DAG for Bilateral Bay, extending the Acme model with handedness covariates and inheritance parameters.](figures/bilateral-bay-no-kstar.pdf){#fig-bilateral-bay width=95% fig-pos='H'}
 
 Looking at the DAG, we see that the conditional probability of $K$ can be calculated,
 as before, by $\mathring{R}_\mathrm{Ad}$ divided by $\mathring{R}_\mathrm{Tot}$.  We again use
@@ -439,9 +461,16 @@ we now must account for the possibility that an offspring was born after the adu
 was sampled, so we incorporate $p$, the annual probability of survival.  We also
 will include length, $L$ as a variable in the model, and related to that we will
 include $C$ which indicates whether the individual was sampled, i.e., **C**aught.
-We do the latter to have a graphical depiction of the length-selective sampling.
+Note that we are always implicitly conditioning upon the fact that the sample
+was sampled; however, we add it here to give us a graphical depiction of the length-selective sampling.
 
+![Sanctuary Sound with observed ages, length-selective sampling, and adult survival.](figures/sanctuary-sound-known-age-no-kstar.pdf){#fig-sanctuary-sound-known-age width=75% fig-pos='H'}
 
+In Sanctuary Sound, we don't actually observe age without uncertainty, but we are
+merely showing what we would have if we did (i.e., the ideal case).  Since we are
+conditioning on age and it is observed with certainty, in this ideal case,
+the length of the sampled individuals has no effect on the kinship probabilities.  
+The conditional probability 
 
 
 We now get to a scenario that involves summing over some intermediate
