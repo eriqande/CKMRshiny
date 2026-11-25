@@ -84,8 +84,8 @@ a helpful way of visualizing and summarizing the models we encountered.
 # The Acme Archipelago
 
 This scenario was the first and simplest one we encountered---estimating
-an initial number of females, $N_{0,f}$ and a population growth rate
-$\lambda$ using parent offspring pairs from samples with perfectly known ages.  
+an initial number of females, $N_{0,f}$, and a population growth rate,
+$\lambda$, using parent offspring pairs from samples with perfectly known ages.  
 
 We consider two distinct, sampled females: a _candidate offspring_, denoted
 by the subscript $\mathrm{Ju}$, and a _candidate mother_, denoted by subscript
@@ -101,7 +101,7 @@ that an Ad-Ju pair is a parent-offspring pair (POP) given their ages ($A_\Ad$,$A
 and their sampling years ($S_\Ad$, $S_\Ju$).  Included in the DAG is a reference
 year $y_0$ that the initial population size corresponds to.
 
-![A bare-bones Acme DAG. Ages, sampling years, and the observed kinship $K$ are gray; parameters are unshaded. Shaded diamonds denote fixed inputs.](figures/acme-bare-bones.pdf){#fig-acme-bare-bones width=80% fig-pos='H'}
+![A bare-bones Acme Archipelago DAG. Ages, sampling years, and the observed kinship $K$ are gray; parameters are unshaded. Shaded diamonds denote fixed inputs.](figures/acme-bare-bones.pdf){#fig-acme-bare-bones width=80% fig-pos='H'}
 
 
 
@@ -139,7 +139,8 @@ are conditioned (in this case, age and sampling year).
 The bare-bones DAG was not particularly helpful: it does very little to elucidate the
 dependence structure between the different variables involved.  In many types of models,
 introducing some latent variables can provide a refined picture of the
-dependence structure (for example, a latent indicator variable in a mixture model).
+dependence structure (for example, a latent group-membership
+indicator variable in a mixture model).
 The calculation of CKMR probabilities is similar. By introducing intermediate
 variables or quantities to the DAG, the picture of the dependence structure becomes
 more refined.  In the following DAG, we add additional nodes that refine the
@@ -149,8 +150,8 @@ is no randomness involved: they are deterministic quantities determined
 by their parents in the DAG. We can think of them as degenerate random variables,
 and when we insert them into the DAG we mark their nodes with dashed lines.
 We also introduce some colors to the DAG to be more explicit about parameters,
-covariates, and "observed data," and we introduce a simple error model for
-the kinship assignment.
+covariates, and "observed data" which is the kinship of the pair, determined
+with genetic data.
 
 ![A single-pair model for the Acme Archipelago represented as an acyclic directed graph (DAG) with several added intermediate nodes.  See the text for explanation.](figures/acme-no-kstar.pdf){#fig-acme width=70% fig-pos='H'}
 
@@ -173,8 +174,8 @@ fixed inputs or modeling choices.
 We use $A$ for age at sampling and $Y$ for year of sampling.
 The recorded ages and sampling years are the covariates observed on the samples:
 $A_{\mathrm{Ju}}$, $Y_{\mathrm{Ju}}$, $A_{\mathrm{Ad}}$, $Y_{\mathrm{Ad}}$.
-In the Acme Archipelago example, we condition on these data, on both individuals
-being female, and on the comparison being included in the analysis. Since we are
+In the Acme Archipelago example, we condition on these data and on both individuals
+being female. Since we are
 conditioning on the ages and sampling years (and because they are observed without
 error) we do not need to know or specify a distribution for
 sampled ages and years to write down this conditional likelihood.
@@ -216,17 +217,23 @@ In words, this is saying that the probability Ad is Ju's mum, given what we know
 Ad and Ju, is calculated as the expected fraction of all the offspring that "are like"
 Ju (i.e., that have the same covariates as Ju) at the time of Ju's birth (i.e., at $B_\Ju$)
 that were produced by Ad, given what we know about Ad and Ju (i.e., given the covariates
-we have observed on Ad and Ju). This is nothing more than the mathematical statement of
+we have observed on Ad and Ju). This is the mathematical statement of
 what we learned when discussing "Space toast."  
 
-One thing that we did not talk about in our week in Hawaii is that the above expression
-is the expected value of a ratio of two variables.  If the numerator and the denominator
-were independent random variables, than the expectation of that ratio would be the
-ratio of the expectations.  However, Ad's Ju-like offspring are part of the total output
-of Ju-like offspring at $B_\Ju$.  Thus, the numerator and the denominator are not
-actually independent.  Nonetheless, if the total number of adults is large and the
+One thing that I don't recall talking about in our week in Hawaii is that the above expression
+is the expected value of a ratio of two random variables.  In general, this is not the same
+as the ratio of the expected values.  The numerator and the denominator in this case
+are not independent random variables, because Ad's Ju-like offspring are part of the total output
+of Ju-like offspring at $B_\Ju$.  When $X$ and $Y$ are dependent random variables
+with expected values $\mu_X$ and $\mu_Y$,  a second-order Taylor expansion gives
+$$
+E\biggl[\frac{X}{Y}\biggr] = \frac{\mu_X}{\mu_Y} - \frac{\mathrm{Cov}(X,Y)}{\mu_Y^2}
++ \frac{\mu_X \mathrm{Var}(Y)}{\mu_Y^3}.
+$$
+The second two terms in this are of the order of $1/N^2$. If the total
+number of adults ($N$) is large and the
 variance in output of any one adult is not large, the expectation of the ratio above
-is well approximated by the ratio of the expectations, so, it is standard in CKMR
+is well approximated by the ratio of the expectations. Thus, it is standard in CKMR
 to evaluate the kinship probability as:
 $$
 \begin{aligned}
@@ -268,7 +275,7 @@ $$
 \mathring{R}_\Tot \equiv 
 E[\mbox{Total~\#~of~Ju-like~offspring~at~}B_\Ju~|~\mbox{stuff (i.e., covariates) about Ju and the population}].
 $$
-This quantity is in the same relative reproductive output units at $\mathring{R}_\Ad$.
+This quantity is in the same relative reproductive output units as $\mathring{R}_\Ad$.
 Looking at the DAG we see that $\mathring{R}_\Tot$ depends on $N_{0,f}$, $\lambda$, $y_0$, and
 $B_\Ju$, and, indeed, we have:
 
@@ -319,8 +326,7 @@ K\mid\mathring R_{\mathrm{Ad}},\mathring R_{\mathrm{Tot}}
        \frac{\mathring R_{\mathrm{Ad}}}{\mathring R_{\mathrm{Tot}}}\right),\\[3pt]
 \end{aligned}
 $$
-And we can check that the probability of a true POP occurring (i.e., the
-probability of detecting a POP when $\alpha = \beta = 0$) is the familiar
+And we can check that the probability of a POP occurring is the familiar
 expression:
 $$
 P(K \mid N_{0,f}, \lambda, y_0, A_\mathrm{mat}, A_\Ju, Y_\Ju, A_\Ad, Y_\Ad) = 
@@ -339,24 +345,22 @@ the model (at least to make it easier to see how the different models relate).
 This is really more of an aside, but I include it here because it turns out to be
 important. Often, the kinship of the pair will not be observed without uncertainty.
 We do everything we can to keep the false positive rate---let us call that
-$\alpha$, to a minimum, low enough that we can confidently call it zero.
-But quite often the false negative rate will be non-zero, and we must include
+$\alpha$---to a minimum, low enough that we can confidently call it zero.
+But quite often the false negative rate---let's call that $\beta$---will
+be non-zero, and we must include
 that in the CKMR likelihood by modeling the probability of _detecting_ a kin pair,
-rather than of it existing.  This additional layer of complexity can be depicted
+rather than of it simply occurring  This additional layer of complexity can be depicted
 easily in our DAG.  One simple way of doing it is to include $K^*$, which is the
 _observed_ kinship, depending on the true kinship, $K$, as well as $\alpha$ and $\beta$.
 
 ![A single-pair model for the Acme Archipelago including uncertainty about the kinship.](figures/acme-dag.pdf){#fig-acme width=70% fig-pos='H'}
 
-$K^*$ is the recorded/detected mother-offspring classification.  We denote the
-false positive rate by $\alpha$ and the false negative rate by $\beta$.
-These are fixed inputs, not parameters estimated by the likelihood. We generally aim to make 
-$\alpha$ negligible and take it as zero, and
-the Acme Archipelago example assumes $\alpha=0$ and $\beta=0$. However, it will
+
+$\alpha$ and $\beta$ are fixed inputs, not parameters estimated by
+the likelihood. The Acme Archipelago example assumes $\alpha=0$ and $\beta=0$. However, it will
 be useful, later, to think in terms of genetically _detected_ kin pairs rather than
-actual kin pairs, so keeping $K$ latent
-and $K^*$ observed, here, makes the detection step explicit even in that special case.
-A simple observation error model is:
+actual kin pairs, and the graph above makes the detection step explicit.
+A simple observation error model congruent with the DAG is:
 $$
 \begin{aligned}
 P(K^* = 1 | K = 1) &= 1-\beta  \\
@@ -371,11 +375,6 @@ K^*\mid K,\alpha,\beta
   \sim \operatorname{Bernoulli}(\alpha+(1-\alpha-\beta)K)
 $$
 
-We have:
-$$
-K^*\mid K,\alpha,\beta
-  \sim \operatorname{Bernoulli}\{\alpha+(1-\alpha-\beta)K\}.
-$$
 
 # Bilateral Bay
 
@@ -406,7 +405,7 @@ so we don't have to worry further about the sampling.
 
 The DAG for this situation appears below.
 
-![A DAG for Bilateral Bay, extending the Acme model with handedness covariates and inheritance parameters.](figures/bilateral-bay-no-kstar.pdf){#fig-bilateral-bay width=95% fig-pos='H'}
+![A DAG for Bilateral Bay, extending the Acme Archipelago model with handedness covariates and inheritance parameters.](figures/bilateral-bay-no-kstar.pdf){#fig-bilateral-bay width=95% fig-pos='H'}
 
 Looking at the DAG, we see that the conditional probability of $K$ can be calculated,
 as before, by $\mathring{R}_\mathrm{Ad}$ divided by $\mathring{R}_\mathrm{Tot}$.  We again use
@@ -443,8 +442,8 @@ P_{R|R}&\mbox{if}~~H_\Ad = \mbox{RH},~~H_\Ju = \mbox{RH}  \\
 1 - P_{R|R}&\mbox{if}~~H_\Ad = \mbox{RH},~~H_\Ju = \mbox{LH}.
 \end{cases}
 $$
-Good! I find that pretty clear, and I hope anyone else that likes to think in
-terms of DAGs does also.
+Good! I feel like the DAGs allow a good comparison between Acme Archipelago
+and Bilateral Bay.
 
 # Sanctuary Sound
 
@@ -459,18 +458,27 @@ incorporates points 1 and 2, above, but we will assume that age is known
 (i.e., we are making a DAG of the "ideal" case).  With sampling being non-lethal,
 we now must account for the possibility that an offspring was born after the adult
 was sampled, so we incorporate $p$, the annual probability of survival.  We also
-will include length, $L$ as a variable in the model, and related to that we will
+will include length $L$ as a variable in the model, and related to that we will
 include $C$ which indicates whether the individual was sampled, i.e., **C**aught.
 Note that we are always implicitly conditioning upon the fact that the sample
 was sampled; however, we add it here to give us a graphical depiction of the length-selective sampling.
 
 ![Sanctuary Sound with observed ages, length-selective sampling, and adult survival.](figures/sanctuary-sound-known-age-no-kstar.pdf){#fig-sanctuary-sound-known-age width=75% fig-pos='H'}
 
+We have included length in the model as a variable that depends on age (because it does!)
 In Sanctuary Sound, we don't actually observe age without uncertainty, but we are
 merely showing what we would have if we did (i.e., the ideal case).  Since we are
 conditioning on age and it is observed with certainty, in this ideal case,
 the length of the sampled individuals has no effect on the kinship probabilities.  
-The conditional probability 
+This is easily confirmed by applying the law of conditional probability, and you
+can read it from the graph.
+
+
+Of course, in Santuary Sound, the AI camera traps don't record age, but rather observe
+the length of the dolphin, so the DAG we are dealing with looks much more like:
+
+
+
 
 
 We now get to a scenario that involves summing over some intermediate
